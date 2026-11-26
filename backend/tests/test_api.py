@@ -289,3 +289,23 @@ def test_synchro_echec_enregistre(connecte):
         synchro.synchroniser("test", bundles=casse())
     s = connecte.get("/api/synchro").json()["historique"][0]
     assert s["statut"] == "failed" and "401" in s["message"]
+
+
+def test_executeur_en_arriere_plan(connecte):
+    """Le vrai fil d'exécution (verrou Postgres, réveil) traite une tâche sans intervention."""
+    import time
+
+    from app import executeur
+
+    f = ajouter_fiche("Arriere", "Plan", "38000")
+    executeur.demarrer()
+    try:
+        t = connecte.post("/api/taches", json={"connecteurs": ["faux"], "cible": {"ids": [f]}}).json()
+        for _ in range(100):
+            if connecte.get(f"/api/taches/{t['id']}").json()["statut"] == "done":
+                break
+            time.sleep(0.1)
+        assert connecte.get(f"/api/taches/{t['id']}").json()["statut"] == "done"
+    finally:
+        executeur.arreter()
+    assert connecte.get("/api/stats").json()["pending"] == 1

@@ -31,7 +31,8 @@ async def lifespan(_: FastAPI):
         synchro.nettoyer_interrompues()
         executeur.demarrer()
     yield
-    executeur.arreter()
+    if config.EXECUTEUR:
+        executeur.arreter()
     db.close()
 
 

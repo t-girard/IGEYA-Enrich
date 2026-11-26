@@ -221,10 +221,14 @@ def demarrer() -> None:
 
 
 def arreter() -> None:
+    """Arrêt propre : la tâche en cours garde son curseur et reprendra au redémarrage."""
+    global _fil
+    if not _fil:
+        return  # jamais démarré : surtout ne pas lever le drapeau d'arrêt
     _stop.set()
     reveil.set()
-    if _fil:
-        _fil.join(timeout=10)
+    _fil.join(timeout=10)
+    _fil = None
 
 
 def nouvelle_tache(conn: psycopg.Connection, par: str, ids_connecteurs: list[str], cible: dict, libelle: str) -> dict:
