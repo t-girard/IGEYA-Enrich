@@ -1,9 +1,9 @@
 'use client';
 
+import { useApi } from '@/lib/api';
 import { useStore } from '@/lib/store';
-import { useDups, useFicheMap } from '@/lib/hooks';
 import { fmtDate, plural } from '@/lib/text';
-import { FIELD_LABEL, type Field, type PushState } from '@/lib/types';
+import { FIELD_LABEL, type FicheDetail, type Field, type PushState } from '@/lib/types';
 import { Chip, Ic } from './ui';
 
 function PushChip({ v }: { v: PushState }) {
@@ -12,19 +12,16 @@ function PushChip({ v }: { v: PushState }) {
   return <Chip>Rien à diffuser</Chip>;
 }
 
-/** Fiche d'un professionnel : coordonnées avec leur source, historique, état de diffusion. */
+/** Fiche d'un professionnel : coordonnées avec leur source, lieux d'exercice, historique, état de diffusion. */
 export default function Drawer({ id }: { id: string }) {
-  const fmap = useFicheMap();
-  const dups = useDups();
-  const pending = useStore((s) => s.props.filter((p) => p.ficheId === id && p.status === 'pending').length);
+  const version = useStore((s) => s.version);
   const openFiche = useStore((s) => s.openFiche);
   const enrichOne = useStore((s) => s.enrichOne);
   const goControlFiche = useStore((s) => s.goControlFiche);
-  const f = fmap.get(id);
-  if (!f) return null;
-  const others = (dups.get(id) ?? []).map((x) => fmap.get(x)).filter((x): x is NonNullable<typeof x> => !!x);
+  const { data: f, error } = useApi<FicheDetail>('/fiches/' + encodeURIComponent(id), version);
 
   const box = (field: Field) => {
+    if (!f) return null;
     const v = f[field];
     const src = field === 'tel' ? f.telSrc : f.emailSrc;
     const updated = f.history.some((h) => h.field === field);
@@ -35,7 +32,9 @@ export default function Drawer({ id }: { id: string }) {
           {updated ? <Chip tone="good">Mis à jour</Chip> : null}
         </div>
         <div className="v">{v ? <span className="mono" style={{ fontSize: 15 }}>{v}</span> : <Chip tone="bad">Manquant</Chip>}</div>
-        <div className="sub">{src ? `Source : ${src.source} · ${fmtDate(src.at)}` : 'Aucune source enregistrée'}</div>
+        <div className="sub">
+          {src ? <>Source : {src.url ? <a href={src.url} target="_blank" rel="noreferrer">{src.source}</a> : src.source} · {fmtDate(src.at)}</> : 'Aucune source enregistrée'}
+        </div>
       </div>
     );
   };
@@ -43,68 +42,93 @@ export default function Drawer({ id }: { id: string }) {
   return (
     <>
       <div className="scrim" onClick={() => openFiche(null)} />
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label={`Fiche de ${f.prenom} ${f.nom}`}>
+      <aside className="drawer" role="dialog" aria-modal="true" aria-label={f ? `Fiche de ${f.prenom} ${f.nom}` : 'Fiche'}>
         <header>
           <div>
-            <h2>{f.prenom} {f.nom.toUpperCase()}</h2>
-            <div className="sub">{f.metier} · {f.adresse}, {f.cp} {f.ville}</div>
-            <div className="sub mono">{f.id} · RPPS {f.rpps}</div>
+            {f ? (
+              <>
+                <h2>{f.prenom} {f.nom.toUpperCase()}</h2>
+                <div className="sub">{f.metier}{f.specialite ? ` · ${f.specialite}` : ''} · {f.adresse}{f.adresse ? ', ' : ''}{f.cp} {f.ville}</div>
+                <div className="sub mono">{f.id}{f.rpps ? ` · RPPS ${f.rpps}` : ''}</div>
+              </>
+            ) : (
+              <h2>{error ? 'Fiche introuvable' : 'Chargement…'}</h2>
+            )}
           </div>
           <button className="btn btn-ghost btn-sm" onClick={() => openFiche(null)} aria-label="Fermer la fiche">
             <Ic name="x" />
           </button>
         </header>
-        <div className="drawer-body">
-          {box('tel')}
-          {box('email')}
-          {others.length > 0 && (
-            <div className="form-err" style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}>
-              Doublon possible avec la fiche{' '}
-              {others.map((d, i) => (
-                <span key={d.id}>
-                  {i > 0 && ', '}
-                  <button className="linkbtn" style={{ color: 'inherit', textDecoration: 'underline' }} onClick={() => openFiche(d.id)}>{d.id}</button>
-                </span>
-              ))}{' '}
-              (même nom, prénom et code postal).
+        {error && <div className="drawer-body"><div className="form-err">{error}</div></div>}
+        {f && (
+          <div className="drawer-body">
+            {box('tel')}
+            {box('email')}
+            {!f.actif && <div className="hint"><span>Aucun lieu d’exercice actif dans l’Annuaire Santé.</span></div>}
+            {f.dups.length > 0 && (
+              <div className="form-err" style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}>
+                Doublon possible avec la fiche{' '}
+                {f.dups.map((d, i) => (
+                  <span key={d}>
+                    {i > 0 && ', '}
+                    <button className="linkbtn" style={{ color: 'inherit', textDecoration: 'underline' }} onClick={() => openFiche(d)}>{d}</button>
+                  </span>
+                ))}{' '}
+                (même nom, prénom et code postal).
+              </div>
+            )}
+            {f.pending > 0 && (
+              <div className="hint">
+                <span>{plural(f.pending, 'proposition')} en attente de contrôle pour cette fiche.</span>
+                <button className="btn btn-sm" onClick={() => goControlFiche(f.nom)}>Ouvrir le contrôle</button>
+              </div>
+            )}
+            <div>
+              <h3 style={{ fontSize: 14, marginBottom: 8 }}>Diffusion</h3>
+              <div className="tags">
+                <span>ONE (téléphone) :</span> <PushChip v={f.push.one} />
+                <span style={{ marginLeft: 8 }}>OUTREACH (e-mail) :</span> <PushChip v={f.push.out} />
+              </div>
             </div>
-          )}
-          {pending > 0 && (
-            <div className="hint">
-              <span>{plural(pending, 'proposition')} en attente de contrôle pour cette fiche.</span>
-              <button className="btn btn-sm" onClick={() => goControlFiche(f.id)}>Ouvrir le contrôle</button>
-            </div>
-          )}
-          <div>
-            <h3 style={{ fontSize: 14, marginBottom: 8 }}>Diffusion</h3>
-            <div className="tags">
-              <span>ONE (téléphone) :</span> <PushChip v={f.push.one} />
-              <span style={{ marginLeft: 8 }}>OUTREACH (e-mail) :</span> <PushChip v={f.push.out} />
-            </div>
-          </div>
-          <div>
-            <h3 style={{ fontSize: 14, marginBottom: 8 }}>Historique</h3>
-            <ul className="timeline">
-              {f.history.map((h) => (
-                <li key={h.at + h.field}>
-                  <strong>{FIELD_LABEL[h.field]}</strong> mis à jour le {fmtDate(h.at)}
-                  <div className="sub">{h.from ? <><s>{h.from}</s> → </> : null}{h.to}</div>
-                  <div className="sub">Source : {h.source} · validé par {h.by}</div>
+            {f.lieux.length > 0 && (
+              <div>
+                <h3 style={{ fontSize: 14, marginBottom: 8 }}>Lieux d’exercice (Annuaire Santé)</h3>
+                <ul className="timeline">
+                  {f.lieux.map((l, i) => (
+                    <li key={i}>
+                      <strong>{l.structure || 'Lieu d’exercice'}</strong>
+                      {l.actif === 'non' && <> <Chip>Inactif</Chip></>}
+                      <div className="sub">{[l.adresse, [l.cp, l.ville].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</div>
+                      {(l.tel || l.mode) && <div className="sub">{[l.mode, l.tel].filter(Boolean).join(' · ')}</div>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div>
+              <h3 style={{ fontSize: 14, marginBottom: 8 }}>Historique</h3>
+              <ul className="timeline">
+                {f.history.map((h, i) => (
+                  <li key={h.at + h.field + i}>
+                    <strong>{FIELD_LABEL[h.field]}</strong> mis à jour le {fmtDate(h.at)}
+                    <div className="sub">{h.from ? <><s>{h.from}</s> → </> : null}{h.to}</div>
+                    <div className="sub">Source : {h.source} · validé par {h.by}</div>
+                  </li>
+                ))}
+                <li>
+                  <strong>Fiche créée</strong>
+                  <div className="sub">{f.creeLe ? `Le ${fmtDate(f.creeLe)}` : ''}{f.ansMaj ? ` · Annuaire Santé mis à jour le ${fmtDate(f.ansMaj)}` : ''}</div>
                 </li>
-              ))}
-              <li>
-                <strong>Fiche créée</strong>
-                <div className="sub">Reprise initiale de la base ONE</div>
-              </li>
-            </ul>
+              </ul>
+            </div>
+            <div>
+              <button className="btn btn-primary" onClick={() => enrichOne(f)}>
+                <Ic name="globe" />
+                Enrichir cette fiche
+              </button>
+            </div>
           </div>
-          <div>
-            <button className="btn btn-primary" onClick={() => enrichOne(f.id)}>
-              <Ic name="globe" />
-              Enrichir cette fiche
-            </button>
-          </div>
-        </div>
+        )}
       </aside>
     </>
   );

@@ -1,57 +1,95 @@
-# IGEYA Enrich — maquette
+# IGEYA Enrich
 
-Maquette fonctionnelle de la plateforme d'enrichissement des bases de prospects (en amont d'OUTREACH et de ONE).
-Toutes les données sont fictives et tous les traitements (connecteurs web, diffusion) sont simulés.
+Plateforme d'enrichissement des fiches de professionnels de santé, en amont de **ONE** (CRM) et
+d'**OUTREACH** (marketing). Base de référence alimentée par l'Annuaire Santé, sources multiples
+(fichiers, connecteurs web), contrôle humain avant toute écriture, diffusion par base partagée.
 
-**Identifiants de test** : `demo@igeya.fr` / `Igeya-2026`
-(connexion simulée dans le navigateur : elle ne protège rien, c'est une maquette).
+```
+Sources                         Zone de transit              Contrôle humain        Base de référence        Diffusion
+─────────────────────────       ────────────────────         ───────────────        ─────────────────        ─────────────────
+Annuaire Santé (chaque nuit) ─┐
+Fichiers CSV / Excel ─────────┼─► propositions normalisées ─► accepter / rejeter ─► fiches + historique ─► igeya.diffusion
+Connecteurs Python ───────────┘   doublons, incertitudes       seul ou en lot         source et date            lue par ONE
+(un fichier = une source)                                                              par coordonnée            et OUTREACH
+```
 
-## Essayer la maquette
-
-- **En ligne** : via GitHub Pages, si le site est activé (*Settings → Pages → Deploy from a branch → `main` / `/ (root)`*).
-- **En local, sans rien installer** : télécharger le dépôt, puis double-cliquer sur `index.html` dans Chrome.
-- Fichier de test pour l'import : `exemple_prospects.csv`.
+Principe : **aucune source n'écrit directement dans une fiche**. Seule exception, documentée : la
+synchronisation Annuaire Santé met à jour l'identité des professionnels et remplit un téléphone ou un
+e-mail **vide** ; elle n'écrase jamais une coordonnée existante.
 
 ## Contenu du dépôt
 
-| Emplacement | Rôle |
+| Dossier | Rôle |
 | --- | --- |
-| `index.html`, `_next/`, `404.html`, … | Le site **compilé** (export statique de Next.js). C'est ce que GitHub Pages sert. |
-| `.nojekyll` | Indispensable : sans lui, GitHub Pages ignore le dossier `_next` et la page s'affiche sans style. |
-| `source/` | Le **code source** (Next.js, React, TypeScript). Voir `source/README.md`. |
+| `source/` | Le site (Next.js, export statique). Voir `source/README.md`. |
+| `backend/app/` | L'API (Python, FastAPI) : connexion, base, contrôle, import, diffusion, tâches de fond, synchro. |
+| `backend/connecteurs/` | **Les connecteurs : un fichier Python par source.** Voir `backend/connecteurs/README.md`. |
+| `backend/app/ans.py` | Lecture de l'API de l'ANS, reprise du script `annuaire_sante_export.py`. |
+| `backend/app/schema.sql` | Le schéma PostgreSQL (tout dans le schéma `igeya`). |
+| `Dockerfile`, `railway.json` | Image unique (site + API) et réglages de déploiement Railway. |
 
-## Modifier le code puis republier
+## Mise en service sur Railway
+
+1. **Créer le projet** : railway.com → *New Project* → *Deploy from GitHub repo* → `IGEYA-Enrich`.
+   Railway détecte le `Dockerfile` et lance la construction.
+2. **Ajouter la base** : dans le projet, *+ New* → *Database* → *PostgreSQL*.
+   (Si Seb a déjà une base Postgres pour ONE ou OUTREACH, on peut utiliser celle-là : tout IGEYA Enrich
+   vit dans le schéma `igeya`, sans toucher aux autres tables.)
+3. **Variables du service** (service IGEYA-Enrich → *Variables*) :
+
+   | Variable | Valeur |
+   | --- | --- |
+   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (référence proposée par Railway) |
+   | `APP_USERS` | Les comptes : `prenom.nom@igeya.fr:MotDePasseLong;autre@igeya.fr:AutreMotDePasse` |
+   | `SECRET_KEY` | Une longue chaîne aléatoire (signe les sessions) |
+   | `ESANTE_API_KEY` | Votre clé du portail de l'ANS |
+   | `SYNC_PROFESSIONS` | *Facultatif.* Codes de professions à synchroniser, ex. `10,60` (médecins, infirmiers). Vide = toutes. |
+   | `SYNC_HEURE` | *Facultatif.* Heure (Paris) de la synchronisation quotidienne. Défaut : `3`. |
+
+4. **Adresse publique** : service → *Settings* → *Networking* → *Generate Domain*.
+5. **Premier chargement** : connectez-vous, puis dans *Base de référence*, cliquez sur
+   *Lancer le chargement initial*. Il se poursuit sur le serveur même si vous fermez la page.
+   Selon le nombre de professions, il peut durer plusieurs heures (limite de l'ANS : ~17 appels/s).
+
+Ensuite, chaque push sur `main` redéploie automatiquement. La base (schéma, index) se met à jour
+toute seule au démarrage.
+
+## Ajouter un connecteur
+
+Déposer un fichier Python dans `backend/connecteurs/` (copier `_modele.py`), le tester avec
+`python -m app.tester mon_connecteur --nom Dupont --prenom Marie --cp 75011`, puis pousser.
+Il apparaît dans *Connecteurs web* après le redéploiement. Détails : `backend/connecteurs/README.md`.
+
+## Comment ONE et OUTREACH lisent les données
+
+« Envoyer » (écran *ONE et OUTREACH*) dépose une ligne par fiche dans `igeya.diffusion` :
+
+```sql
+SELECT id, donnees FROM igeya.diffusion WHERE destination = 'ONE' AND lu_le IS NULL ORDER BY id;
+UPDATE igeya.diffusion SET lu_le = now() WHERE id = ANY(:ids);   -- une fois intégrées
+```
+
+Vues de l'état courant : `igeya.v_one_prospects` (téléphones), `igeya.v_outreach_contacts` (e-mails).
+Conseil : donner à ONE et OUTREACH un rôle Postgres en lecture seule sur `igeya`, plus le droit
+`UPDATE (lu_le)` sur `igeya.diffusion`.
+
+## Développement local
 
 ```bash
+# API (Python 3.12, PostgreSQL)
+cd backend
+pip install -r requirements-dev.txt
+export DATABASE_URL=postgresql://localhost/igeya APP_USERS="moi@igeya.fr:test" SECRET_KEY=dev
+uvicorn app.main:app --reload          # http://localhost:8000/api/docs
+
+# Site (Node 20+)
 cd source
 npm install
-npm run dev          # test local sur http://localhost:3000
-npm run build        # génère source/out/
+npm run build                           # l'API sert source/out sur http://localhost:8000
+
+# Tests (base jetable)
+TEST_DATABASE_URL=postgresql://localhost/igeya_test python -m pytest
 ```
 
-Pour mettre à jour le site, remplacer les fichiers compilés à la racine par le contenu de `source/out/`
-(en gardant `.nojekyll`, `README.md` et `source/`), puis pousser sur `main`.
-Supprimer d'abord les anciens fichiers compilés (`index.html`, `_next/`, `404.html`, `_not-found*`, `__next*`, `index.txt`) évite d'accumuler des restes d'anciens builds.
-
-## Parcours à tester
-
-1. Connexion.
-2. Base de référence : recherche, filtres par métier et code postal, repérage des téléphones et e-mails manquants.
-3. Connecteurs web (simulés) : Contact Extractor et Annuaire Santé.
-4. Contrôle et validation : source, valeur actuelle, valeur proposée, doublons et correspondances incertaines signalés, téléphone unifié (`+33 X XX XX XX XX`), accepter ou rejeter.
-5. Mise à jour de la fiche après validation (source, date, historique).
-6. Import CSV ou Excel (`.xlsx`) avec rapprochement sur nom + prénom + code postal.
-7. Diffusion simulée vers ONE et OUTREACH.
-
-## Architecture en bref
-
-```
-Sources (fichiers, connecteurs web, Annuaire Santé)
-  → adaptateurs : une proposition par champ
-  → zone de transit : normalisation, rapprochement, doublons, incertitudes
-  → contrôle humain : accepter / rejeter
-  → base de référence : source et date par coordonnée, historique
-  → ONE (téléphone) et OUTREACH (e-mail)
-```
-
-Principe : aucune source n'écrit directement dans la base de référence.
+La CI GitHub (`.github/workflows/ci.yml`) lance ces tests sur un vrai PostgreSQL, vérifie les types
+et la compilation du site, et construit l'image Railway à chaque pull request.

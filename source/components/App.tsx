@@ -14,12 +14,17 @@ import ArchView from './views/ArchView';
 
 export default function App() {
   const user = useStore((s) => s.user);
+  const booting = useStore((s) => s.booting);
   const view = useStore((s) => s.view);
+
+  useEffect(() => {
+    void useStore.getState().boot();
+  }, []);
 
   useEffect(() => {
     // Échap ferme la fiche ouverte.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && useStore.getState().base.openId) useStore.getState().openFiche(null);
+      if (e.key === 'Escape' && useStore.getState().openId) useStore.getState().openFiche(null);
     };
     // Un fichier déposé n'importe où dans la fenêtre est envoyé vers l'import (sinon le navigateur l'ouvrirait).
     const onOver = (e: DragEvent) => e.preventDefault();
@@ -37,6 +42,8 @@ export default function App() {
       window.removeEventListener('drop', onDrop);
     };
   }, []);
+
+  if (booting) return <Toasts />;
 
   return (
     <>

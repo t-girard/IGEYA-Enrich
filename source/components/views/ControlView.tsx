@@ -1,11 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
+import { qs, useApi } from '@/lib/api';
 import { useStore } from '@/lib/store';
-import { useCtx, useFicheMap } from '@/lib/hooks';
-import { flagsOf, isReliable } from '@/lib/proposals';
-import { fmtDate, norm, plural } from '@/lib/text';
-import { FIELD_LABEL, ORIGIN_LABEL, type Decision, type FlagKind, type Origin } from '@/lib/types';
+import { fmtDate, plural } from '@/lib/text';
+import { FIELD_LABEL, type ControlPage, type Decision, type FlagKind, type Origin } from '@/lib/types';
 import { Chip, Empty, PageHead } from '../ui';
 
 const TABS: { k: Decision; label: string }[] = [
@@ -31,47 +30,32 @@ const SEP = ' · ';
 const isInteractive = (t: EventTarget | null) => t instanceof Element && !!t.closest('button, a, input, label, select, summary');
 
 export default function ControlView() {
-  const props = useStore((s) => s.props);
   const ctl = useStore((s) => s.ctl);
+  const version = useStore((s) => s.version);
   const setCtl = useStore((s) => s.setCtl);
   const ctlToggle = useStore((s) => s.ctlToggle);
   const ctlSetMany = useStore((s) => s.ctlSetMany);
-  const accept = useStore((s) => s.accept);
-  const reject = useStore((s) => s.reject);
-  const requeue = useStore((s) => s.requeue);
-  const bulkAccept = useStore((s) => s.bulkAccept);
-  const bulkReject = useStore((s) => s.bulkReject);
+  const decide = useStore((s) => s.decide);
   const acceptReliable = useStore((s) => s.acceptReliable);
   const openFiche = useStore((s) => s.openFiche);
-  const fmap = useFicheMap();
-  const ctx = useCtx();
+  const [busy, setBusy] = useState(false);
+  const act = async (fn: () => Promise<void>) => { setBusy(true); await fn(); setBusy(false); };
 
-  const counts = useMemo(() => {
-    const c = { pending: 0, accepted: 0, rejected: 0 };
-    props.forEach((p) => { c[p.status]++; });
-    return c;
-  }, [props]);
+  // Recherche temporisée.
+  const [q, setQ] = useState(ctl.q);
+  useEffect(() => setQ(ctl.q), [ctl.q]);
+  useEffect(() => {
+    const t = setTimeout(() => { if (q !== ctl.q) setCtl({ q }); }, 300);
+    return () => clearTimeout(t);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const reliable = useMemo(
-    () => props.filter((p) => p.status === 'pending' && isReliable(p, flagsOf(p, ctx, fmap))).length,
-    [props, ctx, fmap],
+  const { data, error, loading } = useApi<ControlPage>(
+    '/propositions' + qs({ statut: ctl.tab, flag: ctl.flag, origine: ctl.origin, q: ctl.q, limite: 200 }), version,
   );
-
-  const rows = useMemo(() => {
-    const nq = norm(ctl.q);
-    const out = [];
-    for (const p of props) {
-      if (p.status !== ctl.tab) continue;
-      const f = fmap.get(p.ficheId);
-      if (!f) continue;
-      if (ctl.origin && p.origin !== ctl.origin) continue;
-      const fl = flagsOf(p, ctx, fmap);
-      if (ctl.flag && !fl.some((x) => x.k === ctl.flag)) continue;
-      if (nq && !norm(f.nom + ' ' + f.prenom + ' ' + f.id).includes(nq)) continue;
-      out.push({ p, f, fl });
-    }
-    return out;
-  }, [props, ctl.tab, ctl.origin, ctl.flag, ctl.q, ctx, fmap]);
+  const counts = data?.counts ?? { pending: 0, accepted: 0, rejected: 0 };
+  const reliable = data?.fiables ?? 0;
+  const rows = (data?.rows ?? []).map(({ p, f, flags }) => ({ p, f, fl: flags }));
+  const total = data?.total ?? 0;
 
   const n = ctl.sel.length;
   const pendRows = rows.filter((r) => r.p.status === 'pending');
@@ -96,7 +80,7 @@ export default function ControlView() {
         <div className="filters f3">
           <div className="field">
             <label htmlFor="c-q">Fiche</label>
-            <input id="c-q" type="search" placeholder="Nom, prénom ou identifiant" value={ctl.q} onChange={(e) => setCtl({ q: e.target.value })} />
+            <input id="c-q" type="search" placeholder="Nom, prénom ou identifiant" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <div className="field">
             <label htmlFor="c-flag">Contrôle</label>
@@ -108,7 +92,7 @@ export default function ControlView() {
             <label htmlFor="c-origin">Source</label>
             <select id="c-origin" value={ctl.origin} onChange={(e) => setCtl({ origin: e.target.value as Origin | '' })}>
               <option value="">Toutes</option>
-              {(Object.keys(ORIGIN_LABEL) as Origin[]).map((o) => <option key={o} value={o}>{ORIGIN_LABEL[o]}</option>)}
+              {Object.entries(data?.origines ?? {}).map(([o, l]) => <option key={o} value={o}>{l}</option>)}
             </select>
           </div>
         </div>
@@ -118,14 +102,14 @@ export default function ControlView() {
             <span>{n ? plural(n, 'proposition sélectionnée', 'propositions sélectionnées') : 'Aucune sélection'}</span>
             {n > 0 && (
               <>
-                <button className="btn btn-sm" onClick={bulkAccept}>Accepter la sélection</button>
-                <button className="btn btn-sm" onClick={bulkReject}>Rejeter la sélection</button>
+                <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => decide('accepter', ctl.sel))}>Accepter la sélection</button>
+                <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => decide('rejeter', ctl.sel))}>Rejeter la sélection</button>
               </>
             )}
             <button
               className="btn btn-sm"
-              disabled={!reliable}
-              onClick={acceptReliable}
+              disabled={!reliable || busy}
+              onClick={() => void act(acceptReliable)}
               title="Valeurs valides, sans doublon, sans doute sur la correspondance et sans remplacement"
             >
               Accepter les {reliable} propositions fiables
@@ -133,7 +117,9 @@ export default function ControlView() {
           </div>
         )}
 
-        {!rows.length ? (
+        {error ? (
+          <Empty title="Impossible de charger les propositions">{error}</Empty>
+        ) : !rows.length ? (
           <Empty title={pending ? 'Rien à contrôler' : 'Aucune proposition ici'}>
             {pending ? 'Importez un fichier ou lancez une recherche web pour générer des propositions.' : 'Les propositions traitées apparaîtront dans cet onglet.'}
           </Empty>
@@ -149,7 +135,7 @@ export default function ControlView() {
                 Sélectionner les {pendRows.length} propositions affichées
               </label>
             )}
-            <div className="tbl-wrap">
+            <div className="tbl-wrap" style={loading ? { opacity: 0.6 } : undefined}>
               <table className="tbl tbl-stack tbl-ctl">
                 <thead>
                   <tr>
@@ -172,10 +158,10 @@ export default function ControlView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 200).map(({ p, f, fl }) => {
-                    const src = p.sources[0];
-                    const cur = f[p.field];
-                    const curSrc = p.field === 'tel' ? f.telSrc : f.emailSrc;
+                  {rows.map(({ p, f, fl }) => {
+                    const src = p.sources[0] ?? { label: '', url: '' };
+                    const cur = f.current;
+                    const curSrc = f.currentSrc;
                     const isSel = ctl.sel.includes(p.id);
                     const parts = src.label.split(SEP);
                     return (
@@ -197,7 +183,7 @@ export default function ControlView() {
                           <div style={{ marginTop: 4 }}><Chip tone="accent">{FIELD_LABEL[p.field]}</Chip></div>
                         </td>
                         <td data-label="Source" title={src.url || src.label}>
-                          <div>{parts[0]}</div>
+                          <div>{src.url ? <a href={src.url} target="_blank" rel="noreferrer">{parts[0]}</a> : parts[0]}</div>
                           {parts.length > 1 && <div className="sub trunc mono">{parts.slice(1).join(SEP)}</div>}
                           {p.sources.length > 1 && <div className="sub">+ {plural(p.sources.length - 1, 'autre source')}</div>}
                         </td>
@@ -231,11 +217,11 @@ export default function ControlView() {
                                 className="btn btn-sm btn-good"
                                 disabled={!p.valid}
                                 title={p.valid ? undefined : 'Valeur invalide : acceptation impossible'}
-                                onClick={() => accept(p.id)}
+                                onClick={() => void decide('accepter', [p.id])}
                               >
                                 Accepter
                               </button>
-                              <button className="btn btn-sm btn-bad" onClick={() => reject(p.id)}>Rejeter</button>
+                              <button className="btn btn-sm btn-bad" onClick={() => void decide('rejeter', [p.id])}>Rejeter</button>
                             </div>
                           )}
                           {p.status === 'accepted' && (
@@ -247,7 +233,7 @@ export default function ControlView() {
                           {p.status === 'rejected' && (
                             <>
                               <Chip>Rejetée</Chip>
-                              <div><button className="linkbtn" onClick={() => requeue(p.id)}>Remettre à contrôler</button></div>
+                              <div><button className="linkbtn" onClick={() => void decide('remettre', [p.id])}>Remettre à contrôler</button></div>
                             </>
                           )}
                         </td>
@@ -257,7 +243,7 @@ export default function ControlView() {
                 </tbody>
               </table>
             </div>
-            {rows.length > 200 && <div className="pager"><span>Les 200 premières propositions sont affichées.</span></div>}
+            {total > rows.length && <div className="pager"><span>Les {rows.length} premières propositions sur {total.toLocaleString('fr-FR')} sont affichées. Traitez-les ou affinez les filtres pour voir les suivantes.</span></div>}
           </>
         )}
       </section>

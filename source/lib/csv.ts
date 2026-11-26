@@ -1,6 +1,5 @@
 import { norm } from './text';
-import type { MapKey } from './types';
-import type { ColumnMap } from './match';
+import type { ColumnMap, MapKey } from './types';
 
 function detectDelim(line: string): string {
   let best = ';';

@@ -21,12 +21,10 @@ function NavItem({ v, icon, label, badge }: { v: View; icon: IconName; label: st
 
 export default function Shell({ children }: { children: ReactNode }) {
   const user = useStore((s) => s.user);
-  const pending = useStore((s) => s.props.filter((p) => p.status === 'pending').length);
-  const todo = useStore((s) => s.fiches.filter((f) => f.push.one === 'todo' || f.push.out === 'todo').length);
-  const confirmReset = useStore((s) => s.confirmReset);
-  const requestReset = useStore((s) => s.requestReset);
+  const pending = useStore((s) => s.stats?.pending ?? 0);
+  const todo = useStore((s) => (s.stats ? s.stats.a_diffuser_one + s.stats.a_diffuser_out : 0));
   const logout = useStore((s) => s.logout);
-  const openId = useStore((s) => s.base.openId);
+  const openId = useStore((s) => s.openId);
 
   return (
     <>
@@ -57,10 +55,7 @@ export default function Shell({ children }: { children: ReactNode }) {
             </div>
             <div className="rail-foot">
               <div className="who">{user?.email}</div>
-              <button className="btn btn-sm" onClick={requestReset}>
-                {confirmReset ? 'Confirmer la réinitialisation' : 'Réinitialiser la démo'}
-              </button>
-              <button className="btn btn-sm" onClick={logout}>
+              <button className="btn btn-sm" onClick={() => void logout()}>
                 <Ic name="logout" />
                 Se déconnecter
               </button>
