@@ -135,5 +135,5 @@ export interface Connector {
   kind: string;
   desc: string;
   fields: Field[];
-  run: (fiche: Fiche, all: Fiche[]) => RawResult[];
+  run: (fiche: Fiche, all: Fiche[]) => RawResult[] | Promise<RawResult[]>;
 }

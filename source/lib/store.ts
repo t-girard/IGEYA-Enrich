@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { Decision, Fiche, FlagKind, ImportRow, MapKey, Origin, Proposal, SyncLogItem, View } from './types';
+import type { Decision, Fiche, FlagKind, ImportRow, MapKey, Origin, Proposal, RawResult, SyncLogItem, View } from './types';
 import { nowIso, plural, sleep } from './text';
 import { seedData, computeDups } from './seed';
 import { guessMap, readSpreadsheet } from './csv';
@@ -301,16 +301,28 @@ export const useStore = create<AppState>()(
           d.conn.log = [];
           d.conn.progress = { done: 0, total: ids.length, created: 0, merged: 0, same: 0, none: 0, finished: false };
         });
-        const delay = Math.max(12, Math.min(140, 2400 / ids.length));
         for (const id of ids) {
+          const f = get().fiches.find((x) => x.id === id);
+          if (!f) continue;
+          // Appels des connecteurs HORS du set immer (ils peuvent faire du réseau).
+          const all = get().fiches;
+          const results = await Promise.all(
+            conns.map(async (c) => {
+              try {
+                return { origin: c.id, rows: await c.run(f, all) };
+              } catch {
+                return { origin: c.id, rows: [] as RawResult[] };
+              }
+            }),
+          );
+          // Application des propositions dans le store (synchrone, comme avant).
           set((d) => {
-            const f = d.fiches.find((x) => x.id === id);
             const pr = d.conn.progress;
-            if (!f || !pr) return;
+            if (!pr) return;
             let got = 0, same = 0;
-            conns.forEach((c) => {
-              c.run(f, d.fiches).forEach((res) => {
-                const st = addProposal(d, { ficheId: f.id, field: res.field, raw: res.raw, source: res.source, url: res.url, conf: res.conf, origin: c.id });
+            results.forEach(({ origin, rows }) => {
+              rows.forEach((res) => {
+                const st = addProposal(d, { ficheId: f.id, field: res.field, raw: res.raw, source: res.source, url: res.url, conf: res.conf, origin });
                 if (st === 'created') { pr.created++; got++; }
                 else if (st === 'merged') { pr.merged++; got++; }
                 else if (st === 'same') { pr.same++; same++; }
@@ -321,7 +333,7 @@ export const useStore = create<AppState>()(
             d.conn.log.unshift(`${f.prenom} ${f.nom.toUpperCase()} : ${got ? plural(got, 'proposition') : same ? 'valeurs déjà à jour' : 'aucun résultat'}`);
             d.conn.log = d.conn.log.slice(0, 6);
           });
-          await sleep(delay);
+          await sleep(80); // ménage la limite de l'ANS (~17 appels/s) et laisse la barre respirer
         }
         set((d) => {
           d.conn.running = false;
