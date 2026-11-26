@@ -2,11 +2,16 @@ import type { Connector, Fiche, RawResult } from './types';
 import { hash, mulberry32, norm } from './text';
 import { rawTel } from './phone';
 import { genN9, mailOf } from './seed';
+import { ANNUAIRE_API } from './config';
 
 /**
- * Les connecteurs de cette maquette sont simulés : aucune requête externe n'est émise.
- * Pour brancher une vraie source, il suffit d'implémenter le contrat `Connector` (voir lib/types.ts)
- * et de l'ajouter à la liste CONNECTORS : le reste de l'application ne change pas.
+ * Un connecteur = une source. Il reçoit une fiche et renvoie des propositions.
+ * La normalisation, les doublons, le contrôle et l'historique sont gérés par IGEYA Enrich.
+ *
+ * Contact Extractor reste simulé (démonstration). « Annuaire Santé » est branché sur
+ * la vraie API FHIR de l'ANS dès qu'un backend est configuré (voir lib/config.ts) ;
+ * sinon il retombe automatiquement sur des données fictives pour que la démo publique
+ * continue de fonctionner sans infrastructure.
  */
 
 const WEBDOM = ['pages-sante-pro.example', 'annuaire-soignants.example', 'cabinet-{ville}.example'];
@@ -60,26 +65,50 @@ const contactExtractor: Connector = {
   },
 };
 
+/** Version simulée de l'Annuaire Santé : utilisée tant qu'aucun backend n'est configuré. */
+function simulateAnnuaire(f: Fiche): RawResult[] {
+  const r = mulberry32(hash(f.id + 'rpps'));
+  const out: RawResult[] = [];
+  const roll = r(), roll2 = r();
+  const variant = Math.floor(r() * 5);
+  const conf = 90 + Math.floor(r() * 10);
+  const label = 'Annuaire Santé · RPPS ' + f.rpps;
+  if (!f.tel) {
+    if (roll < 0.5) out.push({ field: 'tel', raw: rawTel(variant, truthN9(f)), source: label, url: '', conf });
+  } else if (roll < 0.1) {
+    out.push({ field: 'tel', raw: rawTel(variant, genN9(r, f.cp, false)), source: label, url: '', conf });
+  }
+  if (!f.email && roll2 < 0.1) out.push({ field: 'email', raw: mailOf(f.prenom, f.nom, 'mssante-demo.example'), source: label, url: '', conf: conf - 2 });
+  return out;
+}
+
+/** Appel réel : interroge le Worker, qui interroge l'API FHIR de l'ANS. */
+async function fetchAnnuaire(f: Fiche): Promise<RawResult[]> {
+  const q = new URLSearchParams();
+  if (f.rpps) q.set('rpps', f.rpps);
+  if (f.nom) q.set('nom', f.nom);
+  if (f.prenom) q.set('prenom', f.prenom);
+  if (f.cp) q.set('cp', f.cp);
+  const r = await fetch(`${ANNUAIRE_API.replace(/\/$/, '')}/annuaire?${q.toString()}`);
+  if (!r.ok) throw new Error(`Annuaire Santé : HTTP ${r.status}`);
+  const data = (await r.json()) as { results?: RawResult[] };
+  return data.results ?? [];
+}
+
 const annuaireSante: Connector = {
   id: 'rpps',
   name: 'Annuaire Santé',
   kind: 'API de référence',
-  desc: 'Interroge l’annuaire des professionnels à partir du numéro RPPS. Peu de résultats, mais fiables.',
+  desc: 'Interroge l’API FHIR publique de l’ANS à partir du numéro RPPS. Peu de résultats, mais fiables.',
   fields: ['tel', 'email'],
-  run(f) {
-    const r = mulberry32(hash(f.id + 'rpps'));
-    const out: RawResult[] = [];
-    const roll = r(), roll2 = r();
-    const variant = Math.floor(r() * 5);
-    const conf = 90 + Math.floor(r() * 10);
-    const label = 'Annuaire Santé · RPPS ' + f.rpps;
-    if (!f.tel) {
-      if (roll < 0.5) out.push({ field: 'tel', raw: rawTel(variant, truthN9(f)), source: label, url: '', conf });
-    } else if (roll < 0.1) {
-      out.push({ field: 'tel', raw: rawTel(variant, genN9(r, f.cp, false)), source: label, url: '', conf });
+  async run(f) {
+    if (!ANNUAIRE_API) return simulateAnnuaire(f); // pas de backend → mode simulé (démo publique)
+    try {
+      return await fetchAnnuaire(f);
+    } catch (e) {
+      console.warn('[Annuaire Santé]', e);
+      return []; // en mode réel, pas de repli trompeur sur des données fictives
     }
-    if (!f.email && roll2 < 0.1) out.push({ field: 'email', raw: mailOf(f.prenom, f.nom, 'mssante-demo.example'), source: label, url: '', conf: conf - 2 });
-    return out;
   },
 };
 
