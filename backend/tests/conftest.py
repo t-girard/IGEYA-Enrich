@@ -28,10 +28,11 @@ def client():
     import psycopg
     from fastapi.testclient import TestClient
 
-    from app import db
+    from app import api_base, db
     from app.main import app
 
     db.close()
+    api_base.invalider_stats()
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as c:
         c.execute("DROP SCHEMA IF EXISTS igeya CASCADE")
     with TestClient(app) as cl:
