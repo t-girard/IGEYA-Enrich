@@ -1,0 +1,70 @@
+# Compile la maquette (source/) et la publie sur GitHub Pages.
+# - Pull request : vérification des types + compilation (rien n'est publié).
+# - Push sur main : compilation + publication du site.
+#
+# Réglages à faire une fois dans le dépôt :
+#   Settings → Pages → Source : « GitHub Actions »
+#   Settings → Secrets and variables → Actions → onglet Variables :
+#     ANNUAIRE_API = https://xxx.workers.dev   (URL du Worker ; vide = mode simulé)
+name: Compiler et publier le site
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Vérifier les types
+        run: npm run typecheck
+
+      - name: Compiler
+        env:
+          NEXT_PUBLIC_ANNUAIRE_API: ${{ vars.ANNUAIRE_API }}
+        run: |
+          npm run build
+          touch out/.nojekyll
+
+      - name: Préparer la publication
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: source/out
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publier sur GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
