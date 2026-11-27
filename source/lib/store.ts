@@ -10,8 +10,15 @@ export interface Toast { id: number; msg: string; kind?: 'good' | 'bad' }
 export interface BaseState { q: string; metier: string; cp: string; missing: Missing; page: number }
 export interface ImportState { file: string; headers: string[]; rows: string[][]; map: ColumnMap; result: ImportRow[] | null; include: number[]; busy: boolean }
 export interface CtlState { tab: Decision; flag: '' | FlagKind; origin: '' | Origin; q: string; sel: string[] }
-/** Fiches visées par un enrichissement : la sélection, ou toutes les fiches d'un filtre de la base. */
-export type Target = { kind: 'sel' } | { kind: 'filtre'; filtre: Omit<BaseState, 'page'>; label: string; count: number };
+/** Fiches visées par un enrichissement.
+ *  - sel   : sélection manuelle (liste d'IDs dans `sel`)
+ *  - tout  : toutes les fiches de la base (sans filtre)
+ *  - filtre: fiches correspondant à un ou plusieurs critères cumulés
+ */
+export type Target =
+  | { kind: 'sel' }
+  | { kind: 'tout'; count: number }
+  | { kind: 'filtre'; filtre: Omit<BaseState, 'page'>; label: string; count: number };
 type Who = Pick<Fiche, 'id' | 'prenom' | 'nom'>;
 
 export interface AppState {
@@ -286,8 +293,18 @@ export const useStore = create<AppState>()(
       setTarget: (t) => set((d) => { d.conn.target = t; }),
       runEnrich: async () => {
         const { conn, sel } = get();
-        const cible = conn.target.kind === 'filtre' ? { filtre: conn.target.filtre } : { ids: sel };
-        const libelle = conn.target.kind === 'filtre' ? conn.target.label : plural(sel.length, 'fiche sélectionnée', 'fiches sélectionnées');
+        let cible: { ids?: string[]; filtre?: Omit<BaseState, 'page'> };
+        let libelle: string;
+        if (conn.target.kind === 'filtre') {
+          cible = { filtre: conn.target.filtre };
+          libelle = conn.target.label;
+        } else if (conn.target.kind === 'tout') {
+          cible = { filtre: { q: '', metier: '', cp: '', missing: '' } };
+          libelle = 'toutes les fiches';
+        } else {
+          cible = { ids: sel };
+          libelle = plural(sel.length, 'fiche sélectionnée', 'fiches sélectionnées');
+        }
         try {
           const t = await api<Tache>('/taches', { body: { connecteurs: conn.selected, cible, libelle } });
           set((d) => { d.conn.tacheId = t.id; });

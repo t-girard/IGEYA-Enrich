@@ -159,12 +159,15 @@ ALTER TABLE igeya.taches ADD CONSTRAINT taches_statut_check
 ALTER TABLE igeya.taches ADD COLUMN IF NOT EXISTS reprises integer NOT NULL DEFAULT 0;
 
 -- ---------------------------------------------------------------- synchronisation ANS
+-- Migration : bases créées avant la pause/reprise de la synchro ANS.
+ALTER TABLE IF EXISTS igeya.synchros DROP CONSTRAINT IF EXISTS synchros_statut_check;
+
 CREATE TABLE IF NOT EXISTS igeya.synchros (
   id         bigserial PRIMARY KEY,
   debut      timestamptz NOT NULL DEFAULT now(),
   fin        timestamptz,
   depuis     timestamptz,
-  statut     text NOT NULL DEFAULT 'running' CHECK (statut IN ('running', 'done', 'failed')),
+  statut     text NOT NULL DEFAULT 'running' CHECK (statut IN ('running', 'pausing', 'paused', 'done', 'failed', 'cancelling', 'cancelled')),
   pages      integer NOT NULL DEFAULT 0,
   lignes     integer NOT NULL DEFAULT 0,
   creees     integer NOT NULL DEFAULT 0,

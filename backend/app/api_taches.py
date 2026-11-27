@@ -160,3 +160,46 @@ def lancer_synchro(email: str = Depends(auth.utilisateur)) -> dict:
     if not synchro.lancer_en_fond(par=email):
         raise HTTPException(409, "Une synchronisation est déjà en cours.")
     return {"ok": True}
+
+
+@router.post("/synchro/pause")
+def pause_synchro(_: str = Depends(auth.utilisateur)) -> dict:
+    """Demande l'arrêt propre de la synchro en cours après la page actuelle."""
+    if not synchro.en_cours():
+        raise HTTPException(409, "Aucune synchronisation n'est en cours.")
+    # Marquer en base que la pause est demandée (statut visuel immédiat).
+    with connexion() as conn:
+        conn.execute(
+            "UPDATE igeya.synchros SET statut = 'pausing' WHERE statut = 'running'"
+        )
+    synchro.demander_pause()
+    return {"ok": True}
+
+
+@router.post("/synchro/reprendre")
+def reprendre_synchro(_: str = Depends(auth.utilisateur)) -> dict:
+    """Reprend la dernière synchro mise en pause."""
+    if synchro.en_cours():
+        raise HTTPException(409, "Une synchronisation est déjà en cours.")
+    s = synchro.synchro_en_pause()
+    if not s:
+        raise HTTPException(409, "Aucune synchronisation en pause à reprendre.")
+    if not synchro.reprendre_en_fond(s["id"]):
+        raise HTTPException(409, "Impossible de démarrer la reprise.")
+    return {"ok": True}
+
+
+@router.post("/synchro/annuler")
+def annuler_synchro(_: str = Depends(auth.utilisateur)) -> dict:
+    """Annule définitivement la synchro en cours ou en pause."""
+    with connexion() as conn:
+        t = conn.execute(
+            "UPDATE igeya.synchros SET statut = CASE WHEN statut IN ('running', 'pausing') THEN 'cancelling' ELSE 'cancelled' END,"
+            " fin = CASE WHEN statut IN ('running', 'pausing') THEN fin ELSE now() END"
+            " WHERE statut IN ('running', 'pausing', 'paused') RETURNING id, statut"
+        ).fetchone()
+    if not t:
+        raise HTTPException(409, "Aucune synchronisation à annuler.")
+    if t["statut"] == "cancelling":
+        synchro.demander_annulation()
+    return {"ok": True}
