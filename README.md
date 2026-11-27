@@ -99,3 +99,4 @@ TEST_DATABASE_URL=postgresql://localhost/igeya_test python -m pytest
 
 La CI GitHub (`.github/workflows/ci.yml`) lance ces tests sur un vrai PostgreSQL, vérifie les types
 et la compilation du site, et construit l'image Railway à chaque pull request.
+
