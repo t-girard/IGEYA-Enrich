@@ -52,4 +52,5 @@ l'écran, sans empêcher l'application de démarrer.
 | Fichier | Source |
 | --- | --- |
 | `annuaire_sante.py` | API FHIR publique de l'ANS (nécessite `ESANTE_API_KEY`). |
+| `contact_extractor_cf.py` | Scraping via Chrome/Selenium sur un site Cloudflare (nécessite `CF_SITE_URL`, et optionnellement `LOGIN_URL`, `LOGIN_USER`, `LOGIN_PASS`). Dépendances : `selenium`, `undetected-chromedriver`, `Xvfb` et `google-chrome` installés sur le serveur. |
 | `_modele.py` | Modèle commenté (ignoré par l'application). |
