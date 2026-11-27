@@ -33,8 +33,6 @@ e-mail **vide** ; elle n'écrase jamais une coordonnée existante.
 1. **Créer le projet** : railway.com → *New Project* → *Deploy from GitHub repo* → `IGEYA-Enrich`.
    Railway détecte le `Dockerfile` et lance la construction.
 2. **Ajouter la base** : dans le projet, *+ New* → *Database* → *PostgreSQL*.
-   (Si Seb a déjà une base Postgres pour ONE ou OUTREACH, on peut utiliser celle-là : tout IGEYA Enrich
-   vit dans le schéma `igeya`, sans toucher aux autres tables.)
 3. **Variables du service** (service IGEYA-Enrich → *Variables*) :
 
    | Variable | Valeur |
