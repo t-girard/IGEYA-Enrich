@@ -245,6 +245,7 @@ def arreter() -> None:
     reveil.set()
     _fil.join(timeout=10)
     _fil = None
+    _stop.clear()  # l'exécuteur arrêté ne doit pas empêcher un traitement ultérieur
 
 
 def nouvelle_tache(conn: psycopg.Connection, par: str, ids_connecteurs: list[str], cible: dict, libelle: str) -> dict:
