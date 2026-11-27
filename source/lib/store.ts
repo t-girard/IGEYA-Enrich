@@ -63,6 +63,7 @@ export interface AppState {
   toggleConnector: (id: string) => void;
   setTarget: (t: Target) => void;
   runEnrich: () => Promise<void>;
+  followTache: (id: number) => void;
   pushDest: (dest: 'ONE' | 'OUTREACH') => Promise<void>;
 }
 
@@ -294,6 +295,8 @@ export const useStore = create<AppState>()(
           get().toast(errMsg(e), 'bad');
         }
       },
+
+      followTache: (id) => set((d) => { d.conn.tacheId = id; }),
 
       /* ----- Diffusion ----- */
       pushDest: async (dest) => {

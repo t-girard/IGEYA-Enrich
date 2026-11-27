@@ -172,7 +172,7 @@ export interface ConnectorInfo {
   fichier: string;
 }
 
-export type TacheStatut = 'queued' | 'running' | 'done' | 'failed' | 'cancelling' | 'cancelled';
+export type TacheStatut = 'queued' | 'running' | 'done' | 'failed' | 'cancelling' | 'cancelled' | 'pausing' | 'paused';
 export interface Tache {
   id: number;
   par: string;
@@ -188,6 +188,7 @@ export interface Tache {
   erreurs: number;
   journal: string[];
   message: string;
+  reprises: number;
   creeLe: string | null;
   debut: string | null;
   fin: string | null;

@@ -77,19 +77,27 @@ def executer(tid: int) -> None:
     curseur = t["curseur"] or ""
     dernier_appel: dict[str, float] = {}
 
-    while True:
+    def interrompue() -> bool:
+        if _stop.is_set():
+            return True
         with connexion() as conn:
             etat = conn.execute("SELECT statut FROM igeya.taches WHERE id = %s", (tid,)).fetchone()["statut"]
-            if etat == "cancelling" or _stop.is_set():
-                break
+        return etat in ("cancelling", "pausing")
+
+    while True:
+        if interrompue():
+            break
+        with connexion() as conn:
             lot = conn.execute(
                 f"SELECT {COLS_FICHE} FROM igeya.fiches f WHERE {where} AND f.id > %s ORDER BY f.id LIMIT %s",
                 [*params, curseur, LOT],
             ).fetchall()
         if not lot:
             break
+        arret = False
         for fiche in lot:
-            if _stop.is_set():
+            if interrompue():
+                arret = True
                 break
             resultats: list[tuple[connecteurs.Connecteur, dict]] = []
             erreurs: list[str] = []
@@ -132,11 +140,18 @@ def executer(tid: int) -> None:
                 )
                 _journal(conn, tid, ligne)
             curseur = fiche["id"]
+        if arret:
+            break
 
     with connexion() as conn:
         if _stop.is_set():
             return  # arrêt du serveur : la tâche reste « running » et reprendra au redémarrage
         etat = conn.execute("SELECT statut FROM igeya.taches WHERE id = %s", (tid,)).fetchone()["statut"]
+        if etat == "pausing":
+            # En pause : le curseur est gardé, « Reprendre » repartira de la fiche suivante.
+            conn.execute("UPDATE igeya.taches SET statut = 'paused' WHERE id = %s", (tid,))
+            _journal(conn, tid, "Mise en pause : reprise possible à partir de la fiche suivante.")
+            return
         final = "cancelled" if etat == "cancelling" else "done"
         # Cible par filtre : des fiches ont pu sortir du filtre en cours de route (téléphone validé, etc.).
         conn.execute(
@@ -170,6 +185,7 @@ def reprendre_interrompues() -> None:
     with connexion() as conn:
         conn.execute("UPDATE igeya.taches SET statut = 'queued' WHERE statut = 'running'")
         conn.execute("UPDATE igeya.taches SET statut = 'cancelled', fin = now() WHERE statut = 'cancelling'")
+        conn.execute("UPDATE igeya.taches SET statut = 'paused' WHERE statut = 'pausing'")
 
 
 # ---------------------------------------------------------------- planification de la synchro
@@ -229,6 +245,7 @@ def arreter() -> None:
     reveil.set()
     _fil.join(timeout=10)
     _fil = None
+    _stop.clear()  # l'exécuteur arrêté ne doit pas empêcher un traitement ultérieur
 
 
 def nouvelle_tache(conn: psycopg.Connection, par: str, ids_connecteurs: list[str], cible: dict, libelle: str) -> dict:

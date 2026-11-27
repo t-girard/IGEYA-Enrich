@@ -40,7 +40,7 @@ def _tache(t: dict) -> dict:
         "id": t["id"], "par": t["par"], "connecteurs": t["connecteurs"], "libelle": t["libelle"], "statut": t["statut"],
         "total": t["total"], "fait": t["fait"], "crees": t["crees"], "fusionnees": t["fusionnees"],
         "identiques": t["identiques"], "sansResultat": t["sans_resultat"], "erreurs": t["erreurs"],
-        "journal": t["journal"], "message": t["message"],
+        "journal": t["journal"], "message": t["message"], "reprises": t["reprises"],
         "creeLe": formats.iso(t["cree_le"]), "debut": formats.iso(t["debut"]), "fin": formats.iso(t["fin"]),
     }
 
@@ -86,19 +86,48 @@ def lire(tid: int, _: str = Depends(auth.utilisateur)) -> dict:
     return _tache(t)
 
 
+def _transition(tid: int, sql: str, refus: str) -> dict:
+    with connexion() as conn:
+        t = conn.execute(sql, (tid,)).fetchone()
+    if not t:
+        raise HTTPException(409, refus)
+    executeur.reveil.set()
+    return _tache(t)
+
+
+@router.post("/taches/{tid}/pause")
+def pause(tid: int, _: str = Depends(auth.utilisateur)) -> dict:
+    """Met en pause : la position est gardée, « reprendre » repartira de la fiche suivante."""
+    return _transition(
+        tid,
+        """UPDATE igeya.taches SET statut = CASE WHEN statut = 'queued' THEN 'paused' ELSE 'pausing' END
+           WHERE id = %s AND statut IN ('queued', 'running') RETURNING *""",
+        "Seule une recherche en attente ou en cours peut être mise en pause.",
+    )
+
+
+@router.post("/taches/{tid}/reprendre")
+def reprendre(tid: int, _: str = Depends(auth.utilisateur)) -> dict:
+    """Remet en file une recherche en pause (ou en échec) : elle repart après la dernière fiche traitée."""
+    return _transition(
+        tid,
+        """UPDATE igeya.taches SET statut = 'queued', reprises = reprises + 1, message = '', fin = NULL
+           WHERE id = %s AND statut IN ('paused', 'failed') RETURNING *""",
+        "Seule une recherche en pause ou en échec peut être reprise.",
+    )
+
+
 @router.post("/taches/{tid}/annuler")
 def annuler(tid: int, _: str = Depends(auth.utilisateur)) -> dict:
-    with connexion() as conn:
-        t = conn.execute(
-            """UPDATE igeya.taches SET
-                 statut = CASE WHEN statut = 'queued' THEN 'cancelled' ELSE 'cancelling' END,
-                 fin = CASE WHEN statut = 'queued' THEN now() ELSE fin END
-               WHERE id = %s AND statut IN ('queued', 'running') RETURNING *""",
-            (tid,),
-        ).fetchone()
-    if not t:
-        raise HTTPException(409, "Cette tâche n'est plus en cours.")
-    return _tache(t)
+    """Abandon définitif."""
+    return _transition(
+        tid,
+        """UPDATE igeya.taches SET
+             statut = CASE WHEN statut IN ('running', 'pausing') THEN 'cancelling' ELSE 'cancelled' END,
+             fin = CASE WHEN statut IN ('running', 'pausing') THEN fin ELSE now() END
+           WHERE id = %s AND statut IN ('queued', 'running', 'pausing', 'paused', 'failed') RETURNING *""",
+        "Cette recherche est déjà terminée ou abandonnée.",
+    )
 
 
 # ---------------------------------------------------------------- synchronisation
