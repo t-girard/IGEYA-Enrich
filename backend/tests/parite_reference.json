@@ -1,0 +1,496 @@
+{
+ "tel": [
+  [
+   "04 76 12 34 56",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "04.76.12.34.56",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "+33 (0)4 76 12 34 56",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": false,
+    "note": ""
+   }
+  ],
+  [
+   "0476123456",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "04-76-12-34-56",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "476123456",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": "Zéro initial manquant (export Excel), rétabli"
+   }
+  ],
+  [
+   "+33476123456",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "0033 4 76 12 34 56",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "33476123456",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "06 12 34 56 78",
+   {
+    "ok": true,
+    "value": "+33 6 12 34 56 78",
+    "kind": "Mobile",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "07.12.34.56.78",
+   {
+    "ok": true,
+    "value": "+33 7 12 34 56 78",
+    "kind": "Mobile",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "08 00 00 00 00",
+   {
+    "ok": false,
+    "reason": "Numéro spécial (08) non retenu"
+   }
+  ],
+  [
+   "+44 20 7946 0958",
+   {
+    "ok": false,
+    "reason": "Numéro hors France non géré"
+   }
+  ],
+  [
+   "04 76 12 34",
+   {
+    "ok": false,
+    "reason": "Numéro incomplet ou format non reconnu"
+   }
+  ],
+  [
+   "04 76 12 34 56 78",
+   {
+    "ok": false,
+    "reason": "Numéro incomplet ou format non reconnu"
+   }
+  ],
+  [
+   "",
+   {
+    "ok": false,
+    "empty": true,
+    "reason": "Valeur vide"
+   }
+  ],
+  [
+   "  ",
+   {
+    "ok": false,
+    "empty": true,
+    "reason": "Valeur vide"
+   }
+  ],
+  [
+   "abc",
+   {
+    "ok": false,
+    "reason": "Numéro incomplet ou format non reconnu"
+   }
+  ],
+  [
+   "+33 6 12 34 56 78",
+   {
+    "ok": true,
+    "value": "+33 6 12 34 56 78",
+    "kind": "Mobile",
+    "changed": false,
+    "note": ""
+   }
+  ],
+  [
+   "+33 0 6 12 34 56 78",
+   {
+    "ok": true,
+    "value": "+33 6 12 34 56 78",
+    "kind": "Mobile",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "++33476123456",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "0 4 7 6 1 2 3 4 5 6",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": true,
+    "note": ""
+   }
+  ],
+  [
+   "+33 4 76 12 34 56",
+   {
+    "ok": true,
+    "value": "+33 4 76 12 34 56",
+    "kind": "Fixe",
+    "changed": false,
+    "note": ""
+   }
+  ],
+  [
+   "١٢٣",
+   {
+    "ok": false,
+    "reason": "Numéro incomplet ou format non reconnu"
+   }
+  ]
+ ],
+ "email": [
+  [
+   "Jean.Dupont@Mail.FR",
+   {
+    "ok": true,
+    "value": "jean.dupont@mail.fr"
+   }
+  ],
+  [
+   " a@b.fr ",
+   {
+    "ok": true,
+    "value": "a@b.fr"
+   }
+  ],
+  [
+   "pas-un-mail",
+   {
+    "ok": false,
+    "reason": "Adresse e-mail mal formée"
+   }
+  ],
+  [
+   "a@b.c",
+   {
+    "ok": false,
+    "reason": "Adresse e-mail mal formée"
+   }
+  ],
+  [
+   "x@y.zz",
+   {
+    "ok": true,
+    "value": "x@y.zz"
+   }
+  ],
+  [
+   "",
+   {
+    "ok": false,
+    "empty": true,
+    "reason": "Valeur vide"
+   }
+  ],
+  [
+   "é@ü.fr",
+   {
+    "ok": true,
+    "value": "é@ü.fr"
+   }
+  ],
+  [
+   "a b@c.fr",
+   {
+    "ok": false,
+    "reason": "Adresse e-mail mal formée"
+   }
+  ]
+ ],
+ "norm": [
+  [
+   "Éléonore",
+   "eleonore"
+  ],
+  [
+   "  DUPONT-Martin ",
+   "dupont martin"
+  ],
+  [
+   "Ça va ?",
+   "ca va"
+  ],
+  [
+   "Ø",
+   ""
+  ],
+  [
+   "O'Neil",
+   "o neil"
+  ],
+  [
+   "ßtraße",
+   "tra e"
+  ],
+  [
+   "Jean   Pierre",
+   "jean pierre"
+  ],
+  [
+   "ÀÉÎÕÜ",
+   "aeiou"
+  ]
+ ],
+ "lev": [
+  [
+   "martin",
+   "martins",
+   1
+  ],
+  [
+   "dupont",
+   "dupond",
+   1
+  ],
+  [
+   "",
+   "abc",
+   3
+  ],
+  [
+   "kitten",
+   "sitting",
+   3
+  ],
+  [
+   "lea",
+   "léa",
+   1
+  ]
+ ],
+ "cp": [
+  [
+   "38000",
+   "38000"
+  ],
+  [
+   "8000",
+   "08000"
+  ],
+  [
+   "38 000",
+   "38000"
+  ],
+  [
+   "F-75011",
+   "75011"
+  ],
+  [
+   "123456",
+   "12345"
+  ],
+  [
+   "",
+   ""
+  ]
+ ],
+ "match": [
+  [
+   {
+    "nom": "Dupont",
+    "prenom": "Marie",
+    "cp": "75011"
+   },
+   {
+    "nom": "DUPONT",
+    "prenom": "Marie",
+    "cp": "75011"
+   },
+   {
+    "score": 100,
+    "tN": "identique",
+    "tP": "identique",
+    "tC": "identique"
+   }
+  ],
+  [
+   {
+    "nom": "Dupond",
+    "prenom": "Marie",
+    "cp": "75011"
+   },
+   {
+    "nom": "Dupont",
+    "prenom": "Marie",
+    "cp": "75012"
+   },
+   {
+    "score": 71,
+    "tN": "proche",
+    "tP": "identique",
+    "tC": "même département"
+   }
+  ],
+  [
+   {
+    "nom": "Dupont",
+    "prenom": "M",
+    "cp": "38000"
+   },
+   {
+    "nom": "Dupont",
+    "prenom": "Marie",
+    "cp": "69000"
+   },
+   {
+    "score": 60,
+    "tN": "identique",
+    "tP": "initiale",
+    "tC": "différent"
+   }
+  ],
+  [
+   {
+    "nom": "Martin",
+    "prenom": "Mathieu",
+    "cp": "38000"
+   },
+   {
+    "nom": "Martin",
+    "prenom": "Matthieu",
+    "cp": "38100"
+   },
+   {
+    "score": 72,
+    "tN": "identique",
+    "tP": "proche",
+    "tC": "même département"
+   }
+  ],
+  [
+   {
+    "nom": "Leroy",
+    "prenom": "Paul",
+    "cp": ""
+   },
+   {
+    "nom": "Leroi",
+    "prenom": "Paul",
+    "cp": "38000"
+   },
+   {
+    "score": 61,
+    "tN": "proche",
+    "tP": "identique",
+    "tC": "différent"
+   }
+  ],
+  [
+   {
+    "nom": "Roux",
+    "prenom": "Ana",
+    "cp": "38000"
+   },
+   {
+    "nom": "Rous",
+    "prenom": "Ana",
+    "cp": "38000"
+   },
+   {
+    "score": 86,
+    "tN": "proche",
+    "tP": "identique",
+    "tC": "identique"
+   }
+  ],
+  [
+   {
+    "nom": "Bernard",
+    "prenom": "",
+    "cp": "38000"
+   },
+   {
+    "nom": "Bernard",
+    "prenom": "Luc",
+    "cp": "38000"
+   },
+   {
+    "score": 65,
+    "tN": "identique",
+    "tP": "différent",
+    "tC": "identique"
+   }
+  ]
+ ]
+}

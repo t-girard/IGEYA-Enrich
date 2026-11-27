@@ -20,24 +20,6 @@ export function groupTel(n9: string): string {
   return `+33 ${n9[0]} ${n9.slice(1, 3)} ${n9.slice(3, 5)} ${n9.slice(5, 7)} ${n9.slice(7, 9)}`;
 }
 
-/** Écrit un numéro de façons variées, comme on les trouve dans des fichiers ou sur des sites (sert à la simulation). */
-export function rawTel(variant: number, n9: string): string {
-  const d = '0' + n9;
-  const p = [d.slice(0, 2), d.slice(2, 4), d.slice(4, 6), d.slice(6, 8), d.slice(8, 10)];
-  switch (variant % 5) {
-    case 0:
-      return p.join(' ');
-    case 1:
-      return p.join('.');
-    case 2:
-      return `+33 (0)${n9[0]} ${p.slice(1).join(' ')}`;
-    case 3:
-      return d;
-    default:
-      return p.join('-');
-  }
-}
-
 /** Reconnaît les formats courants (points, tirets, +33, 0033, zéro manquant) et les ramène au format unique. */
 export function normTel(raw: unknown): TelResult {
   let s = String(raw ?? '').trim();
@@ -69,4 +51,11 @@ export function normEmail(raw: unknown): EmailResult {
   if (!s) return { ok: false, empty: true, reason: 'Valeur vide' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s)) return { ok: false, reason: 'Adresse e-mail mal formée' };
   return { ok: true, value: s };
+}
+
+/** Code postal sur 5 chiffres : Excel supprime le zéro initial (« 5011 » → « 05011 »). */
+export function normCp(v: unknown): string {
+  let d = String(v ?? '').replace(/\D/g, '');
+  if (d.length === 4) d = '0' + d;
+  return d.slice(0, 5);
 }

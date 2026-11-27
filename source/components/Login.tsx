@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { CREDS, useStore } from '@/lib/store';
+import { useStore } from '@/lib/store';
 import { Brand } from './ui';
 
 export default function Login() {
@@ -10,16 +10,19 @@ export default function Login() {
   const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
     const em = email.trim().toLowerCase();
     if (!em || !pw) {
       setErr('Saisissez votre e-mail et votre mot de passe.');
       return;
     }
-    if (em === CREDS.email && pw === CREDS.pw) login(em);
-    else setErr('E-mail ou mot de passe incorrect. Utilisez les identifiants de test affichés sous le formulaire.');
+    setBusy(true);
+    const error = await login(em, pw);
+    setBusy(false);
+    if (error) setErr(error);
   }
 
   return (
@@ -47,25 +50,9 @@ export default function Login() {
               {err}
             </div>
           )}
-          <button className="btn btn-primary btn-lg" type="submit">
-            Se connecter
+          <button className="btn btn-primary btn-lg" type="submit" disabled={busy}>
+            {busy ? 'Connexion…' : 'Se connecter'}
           </button>
-          <div className="hint">
-            <span>
-              Maquette de démonstration. Identifiants de test : <code>{CREDS.email}</code> et <code>{CREDS.pw}</code>
-            </span>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => {
-                setEmail(CREDS.email);
-                setPw(CREDS.pw);
-                setErr('');
-              }}
-            >
-              Remplir les identifiants de test
-            </button>
-          </div>
         </form>
       </section>
     </div>

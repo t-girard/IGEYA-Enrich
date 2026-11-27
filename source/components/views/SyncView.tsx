@@ -1,50 +1,32 @@
 'use client';
 
+import { useState } from 'react';
+import { useApi } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { plural } from '@/lib/text';
-import { FIELD_LABEL, type Fiche, type Field } from '@/lib/types';
+import { FIELD_LABEL, type DiffusionEtat, type DiffusionPanel, type Field } from '@/lib/types';
 import { Ic, PageHead } from '../ui';
 
-const payloadOne = (f: Fiche) => ({
-  id_externe: f.id,
-  rpps: f.rpps,
-  nom: f.nom,
-  prenom: f.prenom,
-  profession: f.metier,
-  code_postal: f.cp,
-  telephone: f.tel.replace(/\s/g, ''),
-  source: f.telSrc?.source,
-  mis_a_jour: (f.telSrc?.at ?? '').slice(0, 10),
-});
-
-const payloadOut = (f: Fiche) => ({
-  id_externe: f.id,
-  email: f.email,
-  nom: f.nom,
-  prenom: f.prenom,
-  profession: f.metier,
-  code_postal: f.cp,
-  source: f.emailSrc?.source,
-  mis_a_jour: (f.emailSrc?.at ?? '').slice(0, 10),
-});
-
 function Panel({
-  title, desc, list, field, payload, onPush,
+  title, desc, panel, field, dest, onPush,
 }: {
   title: string;
   desc: string;
-  list: Fiche[];
+  panel: DiffusionPanel | undefined;
   field: Field;
-  payload: (f: Fiche) => unknown;
-  onPush: () => void;
+  dest: string;
+  onPush: () => Promise<void>;
 }) {
+  const [busy, setBusy] = useState(false);
+  const list = panel?.apercu ?? [];
+  const n = panel?.n ?? 0;
   return (
     <section className="panel">
       <div className="panel-head">
         <h2>{title}</h2>
-        <button className="btn btn-primary btn-sm" disabled={!list.length} onClick={onPush}>
+        <button className="btn btn-primary btn-sm" disabled={!n || busy} onClick={async () => { setBusy(true); await onPush(); setBusy(false); }}>
           <Ic name="send" />
-          Envoyer {plural(list.length, 'fiche')}
+          Envoyer {plural(n, 'fiche')}
         </button>
       </div>
       <div className="panel-pad" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -65,10 +47,10 @@ function Panel({
                 </tbody>
               </table>
             </div>
-            {list.length > 8 && <span className="sub">+ {list.length - 8} autres fiches</span>}
+            {n > 8 && <span className="sub">+ {(n - 8).toLocaleString('fr-FR')} autres fiches</span>}
             <details>
-              <summary>Voir le message envoyé (exemple)</summary>
-              <pre className="code" style={{ marginTop: 8 }}>{JSON.stringify(payload(list[0]), null, 2)}</pre>
+              <summary>Voir le message déposé pour {dest} (exemple)</summary>
+              <pre className="code" style={{ marginTop: 8 }}>{JSON.stringify(panel?.exemple, null, 2)}</pre>
             </details>
           </>
         ) : (
@@ -88,49 +70,60 @@ function Empty0() {
   );
 }
 
-export default function SyncView() {
-  const fiches = useStore((s) => s.fiches);
-  const syncLog = useStore((s) => s.syncLog);
-  const pushDest = useStore((s) => s.pushDest);
+const LECTURE = `-- Lecture par ONE (même principe pour OUTREACH) :
+SELECT id, donnees FROM igeya.diffusion
+ WHERE destination = 'ONE' AND lu_le IS NULL ORDER BY id;
+-- puis, une fois les fiches intégrées :
+UPDATE igeya.diffusion SET lu_le = now() WHERE id = ANY(:ids);
 
-  const one = fiches.filter((f) => f.push.one === 'todo' && f.tel);
-  const out = fiches.filter((f) => f.push.out === 'todo' && f.email);
+-- État courant, sans passer par la file :
+SELECT * FROM igeya.v_one_prospects;      -- téléphones
+SELECT * FROM igeya.v_outreach_contacts;  -- e-mails`;
+
+export default function SyncView() {
+  const version = useStore((s) => s.version);
+  const pushDest = useStore((s) => s.pushDest);
+  const { data, error } = useApi<DiffusionEtat>('/diffusion', version);
+  const syncLog = data?.journal ?? [];
 
   return (
     <>
       <PageHead title="ONE et OUTREACH">
-        Seules les fiches validées sont diffusées. ONE reçoit les téléphones, OUTREACH reçoit les e-mails. Les envois sont simulés dans cette maquette.
+        Seules les fiches validées sont diffusées. ONE reçoit les téléphones, OUTREACH reçoit les e-mails. L’envoi dépose les fiches dans la base partagée, où ONE et OUTREACH viennent les lire.
       </PageHead>
       <div className="two">
         <Panel
           title="Vers ONE (CRM)"
           desc="ONE reçoit la fiche et son numéro de téléphone normalisé. Il alimente ensuite les batchs des téléprospecteurs."
-          list={one}
+          panel={data?.one}
           field="tel"
-          payload={payloadOne}
-          onPush={() => pushDest('one')}
+          dest="ONE"
+          onPush={() => pushDest('ONE')}
         />
         <Panel
           title="Vers OUTREACH (marketing)"
           desc="OUTREACH reçoit l’adresse e-mail et les attributs de segmentation pour les campagnes e-mail, SMS et landing pages."
-          list={out}
+          panel={data?.out}
           field="email"
-          payload={payloadOut}
-          onPush={() => pushDest('out')}
+          dest="OUTREACH"
+          onPush={() => pushDest('OUTREACH')}
         />
       </div>
+      {error && <div className="form-err">{error}</div>}
       <section className="panel">
         <div className="panel-head"><h2>Journal des envois</h2></div>
         {syncLog.length ? (
           <div className="tbl-wrap">
             <table className="tbl" style={{ minWidth: 480 }}>
-              <thead><tr><th>Date</th><th>Destination</th><th>Fiches</th></tr></thead>
+              <thead><tr><th>Date</th><th>Destination</th><th>Fiches</th><th>Lues par la destination</th><th>Par</th></tr></thead>
               <tbody>
                 {syncLog.slice(0, 8).map((l, i) => (
                   <tr key={l.at + i}>
                     <td>{new Date(l.at).toLocaleString('fr-FR')}</td>
                     <td>{l.dest}</td>
                     <td>{plural(l.n, 'fiche')}</td>
+                    <td>{l.lus === l.n ? 'Toutes' : `${l.lus} / ${l.n}`}</td>
+                    <td className="sub">{l.by}</td>
                   </tr>
                 ))}
               </tbody>
@@ -139,6 +132,10 @@ export default function SyncView() {
         ) : (
           <div className="empty" style={{ padding: '24px 18px' }}>Aucun envoi pour le moment.</div>
         )}
+      </section>
+      <section className="panel">
+        <div className="panel-head"><h2>Comment ONE et OUTREACH lisent les fiches</h2></div>
+        <div className="panel-pad"><pre className="code">{LECTURE}</pre></div>
       </section>
     </>
   );

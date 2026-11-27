@@ -2,7 +2,6 @@
 
 import { useRef, useState } from 'react';
 import { useStore } from '@/lib/store';
-import { useFicheMap } from '@/lib/hooks';
 import { normTel, normEmail } from '@/lib/phone';
 import { plural } from '@/lib/text';
 import type { ImportRow, MapKey } from '@/lib/types';
@@ -45,13 +44,11 @@ const MAP_FIELDS: { k: MapKey; label: string; required?: boolean }[] = [
 export default function ImportView() {
   const imp = useStore((s) => s.imp);
   const loadFile = useStore((s) => s.loadFile);
-  const loadSample = useStore((s) => s.loadSample);
   const setImpMap = useStore((s) => s.setImpMap);
   const resetImport = useStore((s) => s.resetImport);
   const runMatch = useStore((s) => s.runMatch);
   const toggleInclude = useStore((s) => s.toggleInclude);
   const sendToControl = useStore((s) => s.sendToControl);
-  const fmap = useFicheMap();
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
 
@@ -76,7 +73,6 @@ export default function ImportView() {
           <p className="muted">Colonnes attendues : nom, prénom, code postal. Téléphone et e-mail sont facultatifs.</p>
           <div className="actions">
             <button className="btn btn-primary" onClick={() => input.current?.click()}>Choisir un fichier</button>
-            <button className="btn" onClick={loadSample}>Utiliser un fichier d’exemple</button>
           </div>
           <input
             ref={input}
@@ -132,7 +128,11 @@ export default function ImportView() {
               </tbody>
             </table>
           </div>
-          <div><button className="btn btn-primary" onClick={runMatch}>Rapprocher avec la base</button></div>
+          <div>
+            <button className="btn btn-primary" disabled={imp.busy} onClick={() => void runMatch()}>
+              {imp.busy && !res ? 'Rapprochement en cours…' : 'Rapprocher avec la base'}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -165,7 +165,7 @@ export default function ImportView() {
                   const can = !!r.best && r.status !== 'doublon' && r.status !== 'aucune';
                   const on = imp.include.includes(r.line);
                   const m = r.best?.m;
-                  const f = r.best ? fmap.get(r.best.ficheId) : undefined;
+                  const f = r.best?.fiche;
                   return (
                     <tr key={r.line} className={can && on ? '' : 'is-done'}>
                       <td className="c-check">
@@ -196,7 +196,7 @@ export default function ImportView() {
           {res.length > 150 && <div className="pager"><span>Les 150 premières lignes sont affichées. Toutes sont traitées.</span></div>}
           <div className="pager">
             <span>{plural(included, 'ligne')} à transmettre au contrôle. Rien n’est écrit dans la base avant validation.</span>
-            <button className="btn btn-primary" disabled={!included} onClick={sendToControl}>Envoyer vers le contrôle</button>
+            <button className="btn btn-primary" disabled={!included || imp.busy} onClick={() => void sendToControl()}>Envoyer vers le contrôle</button>
           </div>
         </section>
       )}
