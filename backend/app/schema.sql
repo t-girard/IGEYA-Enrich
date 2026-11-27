@@ -95,7 +95,9 @@ CREATE INDEX IF NOT EXISTS propositions_valeur_idx
   ON igeya.propositions (champ, lower(propose)) WHERE statut = 'pending';
 
 -- Signalements calculés : servent au filtrage, aux compteurs et à la validation en lot.
-CREATE OR REPLACE VIEW igeya.v_propositions AS
+-- Vue interne, sans données : recréée à chaque démarrage pour suivre l'évolution des colonnes.
+DROP VIEW IF EXISTS igeya.v_propositions;
+CREATE VIEW igeya.v_propositions AS
 SELECT
   p.*,
   f.nom, f.prenom, f.metier, f.cp, f.ville, f.nom_norm, f.prenom_norm,
@@ -135,7 +137,7 @@ CREATE TABLE IF NOT EXISTS igeya.taches (
   cible          jsonb NOT NULL,
   libelle        text NOT NULL DEFAULT '',
   statut         text NOT NULL DEFAULT 'queued'
-                 CHECK (statut IN ('queued', 'running', 'done', 'failed', 'cancelling', 'cancelled')),
+                 CHECK (statut IN ('queued', 'running', 'done', 'failed', 'cancelling', 'cancelled', 'pausing', 'paused')),
   total          integer NOT NULL DEFAULT 0,
   fait           integer NOT NULL DEFAULT 0,
   crees          integer NOT NULL DEFAULT 0,
@@ -150,6 +152,11 @@ CREATE TABLE IF NOT EXISTS igeya.taches (
   fin            timestamptz
 );
 CREATE INDEX IF NOT EXISTS taches_statut_idx ON igeya.taches (statut, id);
+-- Bases créées avant la pause/reprise : on remplace la contrainte des statuts.
+ALTER TABLE igeya.taches DROP CONSTRAINT IF EXISTS taches_statut_check;
+ALTER TABLE igeya.taches ADD CONSTRAINT taches_statut_check
+  CHECK (statut IN ('queued', 'running', 'done', 'failed', 'cancelling', 'cancelled', 'pausing', 'paused'));
+ALTER TABLE igeya.taches ADD COLUMN IF NOT EXISTS reprises integer NOT NULL DEFAULT 0;
 
 -- ---------------------------------------------------------------- synchronisation ANS
 CREATE TABLE IF NOT EXISTS igeya.synchros (

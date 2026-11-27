@@ -65,7 +65,7 @@ def test_base_filtres_et_pagination(connecte):
 
 def test_connecteurs_listes(connecte):
     cs = {c["id"]: c for c in connecte.get("/api/connecteurs").json()}
-    assert set(cs) == {"faux", "faux2", "plante"} and all(c["pret"] for c in cs.values())
+    assert set(cs) == {"faux", "faux2", "plante", "pause_auto"} and all(c["pret"] for c in cs.values())
 
 
 def test_enrichissement_en_tache_de_fond(connecte):
@@ -108,6 +108,7 @@ def test_tache_par_filtre_et_annulation(connecte):
     assert connecte.get(f"/api/taches/{t['id']}").json()["statut"] == "done"
     assert executeur.traiter_une() is False  # la tâche annulée n'est pas exécutée
     assert connecte.post(f"/api/taches/{a['id']}/annuler").status_code == 409
+    assert connecte.post(f"/api/taches/{a['id']}/reprendre").status_code == 409  # abandon définitif
 
 
 def test_tache_refusee_si_connecteur_inconnu(connecte):
@@ -309,3 +310,49 @@ def test_executeur_en_arriere_plan(connecte):
     finally:
         executeur.arreter()
     assert connecte.get("/api/stats").json()["pending"] == 1
+
+
+def test_pause_et_reprise(connecte):
+    from app import executeur
+    from app.db import connexion
+
+    ids = [ajouter_fiche(f"Pause{i}", "X", "38000") for i in range(3)]
+    t = connecte.post("/api/taches", json={"connecteurs": ["pause_auto"], "cible": {"ids": ids}}).json()
+    executeur.traiter_une()
+    t = connecte.get(f"/api/taches/{t['id']}").json()
+    assert (t["statut"], t["fait"]) == ("paused", 1)          # arrêt propre après la fiche en cours
+    assert t["fin"] is None and "Mise en pause" in t["journal"][0]
+    assert executeur.traiter_une() is False                   # une tâche en pause n'est pas reprise seule
+    assert connecte.post(f"/api/taches/{t['id']}/pause").status_code == 409
+    r = connecte.post(f"/api/taches/{t['id']}/reprendre").json()
+    assert (r["statut"], r["reprises"]) == ("queued", 1)
+    executeur.traiter_une()
+    t = connecte.get(f"/api/taches/{t['id']}").json()
+    assert (t["statut"], t["fait"], t["crees"]) == ("done", 3, 3)  # ni fiche refaite, ni fiche oubliée
+    assert connecte.get("/api/propositions").json()["total"] == 3
+
+    # Pause d'une tâche encore en attente, puis abandon.
+    t2 = connecte.post("/api/taches", json={"connecteurs": ["faux"], "cible": {"ids": ids[:1]}}).json()
+    assert connecte.post(f"/api/taches/{t2['id']}/pause").json()["statut"] == "paused"
+    assert executeur.traiter_une() is False
+    assert connecte.post(f"/api/taches/{t2['id']}/annuler").json()["statut"] == "cancelled"
+
+    # Redémarrage du serveur pendant une mise en pause : la tâche finit « en pause ».
+    with connexion() as conn:
+        conn.execute("UPDATE igeya.taches SET statut = 'pausing' WHERE id = %s", (t["id"],))
+    executeur.reprendre_interrompues()
+    assert connecte.get(f"/api/taches/{t['id']}").json()["statut"] == "paused"
+
+
+def test_reprise_apres_echec(connecte):
+    from app import executeur
+    from app.db import connexion
+
+    f = ajouter_fiche("Echec", "Z", "38000")
+    t = connecte.post("/api/taches", json={"connecteurs": ["faux"], "cible": {"ids": [f]}}).json()
+    with connexion() as conn:
+        conn.execute("UPDATE igeya.taches SET statut = 'failed', message = 'coupure' WHERE id = %s", (t["id"],))
+    r = connecte.post(f"/api/taches/{t['id']}/reprendre").json()
+    assert (r["statut"], r["message"]) == ("queued", "")
+    executeur.traiter_une()
+    assert connecte.get(f"/api/taches/{t['id']}").json()["statut"] == "done"

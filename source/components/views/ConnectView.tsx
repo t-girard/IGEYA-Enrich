@@ -27,23 +27,62 @@ def rechercher(fiche):
 # Modèle complet : backend/connecteurs/_modele.py`;
 
 const fmtN = (n: number) => n.toLocaleString('fr-FR');
-const ACTIVE = ['queued', 'running', 'cancelling'];
+const ACTIVE = ['queued', 'running', 'cancelling', 'pausing'];
+const RESUMABLE = ['paused', 'failed'];
 const STATUT: Record<Tache['statut'], string> = {
-  queued: 'En attente', running: 'En cours', cancelling: 'Arrêt en cours', done: 'Terminée', cancelled: 'Annulée', failed: 'En échec',
+  queued: 'En attente', running: 'En cours', cancelling: 'Abandon en cours', done: 'Terminée', cancelled: 'Abandonnée',
+  failed: 'En échec', pausing: 'Mise en pause…', paused: 'En pause',
 };
 
-function Progress({ t, names }: { t: Tache; names: Record<string, string> }) {
-  const goControl = useStore((s) => s.goControl);
+/** Actions possibles sur une recherche : pause, reprise (repart de la fiche suivante), abandon définitif. */
+function useTacheActions(t: Tache, onChange: () => void) {
   const toast = useStore((s) => s.toast);
+  const followTache = useStore((s) => s.followTache);
+  const call = async (action: 'pause' | 'reprendre' | 'annuler') => {
+    try {
+      await api(`/taches/${t.id}/${action}`, { body: {} });
+      if (action === 'reprendre') {
+        followTache(t.id);
+        toast(`Recherche reprise à la fiche ${(t.fait + 1).toLocaleString('fr-FR')} sur ${t.total.toLocaleString('fr-FR')}.`, 'good');
+      }
+      if (action === 'pause') toast('La recherche s’arrête après la fiche en cours. Vous pourrez la reprendre là où elle en est.');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erreur', 'bad');
+    }
+    onChange();
+  };
+  return call;
+}
+
+function TacheButtons({ t, onChange, blocked }: { t: Tache; onChange: () => void; blocked: boolean }) {
+  const call = useTacheActions(t, onChange);
+  return (
+    <>
+      {(t.statut === 'running' || t.statut === 'queued') && (
+        <button className="btn btn-sm" onClick={() => void call('pause')}>Mettre en pause</button>
+      )}
+      {RESUMABLE.includes(t.statut) && (
+        <button className="btn btn-primary btn-sm" disabled={blocked} title={blocked ? 'Une autre recherche est en cours' : undefined} onClick={() => void call('reprendre')}>
+          Reprendre
+        </button>
+      )}
+      {[...ACTIVE, ...RESUMABLE].includes(t.statut) && t.statut !== 'cancelling' && (
+        <button className="btn btn-sm btn-ghost" onClick={() => { if (window.confirm('Abandonner définitivement cette recherche ? Elle ne pourra plus être reprise.')) void call('annuler'); }}>
+          Abandonner
+        </button>
+      )}
+    </>
+  );
+}
+
+function Progress({ t, names, onChange, blocked }: { t: Tache; names: Record<string, string>; onChange: () => void; blocked: boolean }) {
+  const goControl = useStore((s) => s.goControl);
   const pct = t.total ? Math.min(100, Math.round((t.fait / t.total) * 100)) : t.statut === 'done' ? 100 : 0;
   const active = ACTIVE.includes(t.statut);
-  const cancel = async () => {
-    try { await api(`/taches/${t.id}/annuler`, { body: {} }); } catch (e) { toast(e instanceof Error ? e.message : 'Erreur', 'bad'); }
-  };
   return (
     <>
       <div className="tags">
-        <Chip tone={t.statut === 'done' ? 'good' : t.statut === 'failed' ? 'bad' : active ? 'accent' : undefined}>{STATUT[t.statut]}</Chip>
+        <Chip tone={t.statut === 'done' ? 'good' : t.statut === 'failed' ? 'bad' : t.statut === 'paused' ? 'warn' : active ? 'accent' : undefined}>{STATUT[t.statut]}</Chip>
         <span className="sub">
           {t.libelle} · {t.connecteurs.map((c) => names[c] ?? c).join(' + ')} · lancée par {t.par}{t.creeLe ? ` le ${fmtDate(t.creeLe)}` : ''}
         </span>
@@ -59,10 +98,14 @@ function Progress({ t, names }: { t: Tache; names: Record<string, string> }) {
       {t.message && <div className="form-err">{t.message}</div>}
       {t.journal.length > 0 && <div className="log">{t.journal.map((l, i) => <div key={i}>{l}</div>)}</div>}
       <div className="pills">
-        {active && t.statut !== 'cancelling' && <button className="btn btn-sm" onClick={() => void cancel()}>Arrêter</button>}
-        {t.crees + t.fusionnees > 0 && <button className="btn btn-primary btn-sm" onClick={goControl}>Contrôler les propositions</button>}
+        <TacheButtons t={t} onChange={onChange} blocked={blocked} />
+        {t.crees + t.fusionnees > 0 && <button className="btn btn-sm" onClick={goControl}>Contrôler les propositions</button>}
       </div>
       {active && <p className="sub">La recherche tourne sur le serveur : vous pouvez fermer cette page, elle continue.</p>}
+      {t.statut === 'paused' && (
+        <p className="sub">En pause après {plural(t.fait, 'fiche traitée', 'fiches traitées')}. « Reprendre » repart de la fiche suivante, même dans plusieurs jours.</p>
+      )}
+      {t.reprises > 0 && <p className="sub">Reprise {t.reprises} fois.</p>}
     </>
   );
 }
@@ -84,9 +127,11 @@ export default function ConnectView() {
 
   const { data: connectors, error } = useApi<ConnectorInfo[]>('/connecteurs');
   const [tick, setTick] = useState(0);
-  const { data: recent } = useApi<Tache[]>('/taches?limite=5', version + tick);
+  const { data: recent } = useApi<Tache[]>('/taches?limite=30', version + tick);
   const shown = recent?.find((t) => t.id === conn.tacheId) ?? recent?.find((t) => ACTIVE.includes(t.statut)) ?? recent?.[0];
-  const running = !!shown && ACTIVE.includes(shown.statut);
+  const running = !!recent?.some((t) => ACTIVE.includes(t.statut));
+  const others = (recent ?? []).filter((t) => t.id !== shown?.id && RESUMABLE.includes(t.statut));
+  const refresh = () => setTick((x) => x + 1);
   const names = Object.fromEntries((connectors ?? []).map((c) => [c.id, c.nom]));
 
   // Par défaut : le premier connecteur prêt est coché.
@@ -217,10 +262,35 @@ export default function ConnectView() {
           </button>
         </div>
         <div className="panel-pad" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {running && <p className="sub">Une recherche est déjà en cours : la suivante pourra être lancée quand elle sera terminée ou arrêtée.</p>}
-          {!shown ? <p className="muted">Aucune recherche lancée pour le moment.</p> : <Progress t={shown} names={names} />}
+          {running && <p className="sub">Une recherche est déjà en cours : la suivante pourra être lancée quand elle sera terminée ou mise en pause.</p>}
+          {!shown ? <p className="muted">Aucune recherche lancée pour le moment.</p> : <Progress t={shown} names={names} onChange={refresh} blocked={running} />}
         </div>
       </section>
+
+      {others.length > 0 && (
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Recherches à reprendre</h2>
+            <span className="sub">En pause ou interrompues : elles repartent de la fiche suivante.</span>
+          </div>
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead><tr><th>Recherche</th><th>Sources</th><th>Avancement</th><th>État</th><th /></tr></thead>
+              <tbody>
+                {others.map((t) => (
+                  <tr key={t.id}>
+                    <td>{t.libelle}<div className="sub">par {t.par}{t.creeLe ? ` le ${fmtDate(t.creeLe)}` : ''}</div></td>
+                    <td>{t.connecteurs.map((c) => names[c] ?? c).join(' + ')}</td>
+                    <td>{fmtN(t.fait)} / {fmtN(t.total)}<div className="sub">{plural(t.crees + t.fusionnees, 'proposition')}</div></td>
+                    <td><Chip tone={t.statut === 'failed' ? 'bad' : 'warn'}>{STATUT[t.statut]}</Chip>{t.message && <div className="sub">{t.message.slice(0, 120)}</div>}</td>
+                    <td><div className="pills"><TacheButtons t={t} onChange={refresh} blocked={running} /></div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </>
   );
 }

@@ -52,6 +52,14 @@ e-mail **vide** ; elle n'écrase jamais une coordonnée existante.
 Ensuite, chaque push sur `main` redéploie automatiquement. La base (schéma, index) se met à jour
 toute seule au démarrage.
 
+## Pause et reprise des recherches
+
+Une recherche lancée depuis *Connecteurs web* peut être **mise en pause** : elle s'arrête après la
+fiche en cours et garde sa position. **Reprendre** la relance à partir de la fiche suivante, même
+plusieurs jours après ; une recherche interrompue par une erreur se reprend de la même façon.
+**Abandonner** est définitif. Un redéploiement ne perd rien : la recherche en cours repart seule au
+redémarrage, une recherche en pause reste en pause.
+
 ## Ajouter un connecteur
 
 Déposer un fichier Python dans `backend/connecteurs/` (copier `_modele.py`), le tester avec
