@@ -3,3 +3,7 @@ uvicorn[standard]>=0.30,<1
 psycopg[binary]>=3.2,<4
 psycopg_pool>=3.2,<4
 tzdata
+# Connecteur Contact Extractor (Cloudflare/Selenium) — optionnel
+# Ces paquets ne sont utilisés que si le connecteur contact_extractor_cf.py est actif.
+selenium>=4.20,<5
+undetected-chromedriver>=3.5,<4
