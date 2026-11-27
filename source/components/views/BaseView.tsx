@@ -50,6 +50,12 @@ function FicheLine({ f, selected }: { f: FicheRow; selected: boolean }) {
   );
 }
 
+const SYNCHRO_ACTIF = ['running', 'pausing', 'cancelling'] as const;
+const SYNCHRO_LABEL: Record<string, string> = {
+  running: 'en cours', pausing: 'mise en pause…', cancelling: 'annulation…',
+  paused: 'en pause', cancelled: 'annulée', done: 'terminée', failed: 'en échec',
+};
+
 function SynchroBar() {
   const version = useStore((s) => s.version);
   const bump = useStore((s) => s.bump);
@@ -57,51 +63,78 @@ function SynchroBar() {
   const [tick, setTick] = useState(0);
   const { data } = useApi<SynchroEtat>('/synchro', version + tick);
   const last = data?.historique[0];
-  const running = last?.statut === 'running';
+  const actif = SYNCHRO_ACTIF.some((s) => last?.statut === s);
 
   useEffect(() => {
-    if (!running) return;
+    if (!actif) return;
     const t = setInterval(() => setTick((x) => x + 1), 4000);
     return () => clearInterval(t);
-  }, [running]);
-  // Fin de synchro : on rafraîchit la base.
-  const [wasRunning, setWasRunning] = useState(false);
+  }, [actif]);
+  // Fin de synchro active : on rafraîchit la base.
+  const [wasActif, setWasActif] = useState(false);
   useEffect(() => {
-    if (wasRunning && !running) bump();
-    setWasRunning(running);
-  }, [running]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (wasActif && !actif) bump();
+    setWasActif(actif);
+  }, [actif]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return null;
-  const launch = async () => {
+
+  const call = async (action: 'synchro' | 'synchro/pause' | 'synchro/reprendre' | 'synchro/annuler') => {
     try {
-      await api('/synchro', { body: {} });
-      toast('Synchronisation lancée. Elle se poursuit même si vous fermez la page.', 'good');
+      await api(`/${action}`, { body: {} });
+      if (action === 'synchro') toast('Synchronisation lancée. Elle se poursuit même si vous fermez la page.', 'good');
+      if (action === 'synchro/pause') toast("Pause demandée — la synchro s'arrêtera après la page en cours.", 'good');
+      if (action === 'synchro/reprendre') toast('Reprise de la synchronisation.', 'good');
+      if (action === 'synchro/annuler') toast('Synchronisation annulée.');
       setTick((x) => x + 1);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erreur', 'bad');
     }
   };
+
   const lastDone = data.historique.find((s) => s.statut === 'done');
+  const enPause = last?.statut === 'paused';
+  const running = last?.statut === 'running';
+
   return (
-    <div className="selbar" style={{ justifyContent: 'space-between' }}>
+    <div className="selbar" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
       <span>
         <strong>Annuaire Santé</strong>{' '}
         {!data.configuree ? (
           <>— clé <code>ESANTE_API_KEY</code> non configurée sur le serveur.</>
-        ) : running ? (
-          <>— synchronisation en cours : {fmtN(last!.lignes)} lignes lues ({fmtN(last!.creees)} fiches créées, {fmtN(last!.maj)} mises à jour)…</>
+        ) : actif ? (
+          <>— synchronisation {SYNCHRO_LABEL[last!.statut] ?? last!.statut} : {fmtN(last!.lignes)} lignes lues ({fmtN(last!.creees)} créées, {fmtN(last!.maj)} mises à jour)…</>
+        ) : enPause ? (
+          <>— synchronisation en pause ({fmtN(last!.pages)} pages, {fmtN(last!.lignes)} lignes traitées).</>
         ) : last?.statut === 'failed' ? (
           <>— dernière synchronisation en échec le {fmtDate(last.debut)} : {last.message || 'erreur inconnue'}</>
+        ) : last?.statut === 'cancelled' ? (
+          <>— dernière synchronisation annulée le {fmtDate(last.debut)}.</>
         ) : lastDone ? (
           <>— à jour au {fmtDate(lastDone.fin)}{data.auto ? `, synchronisation automatique chaque nuit à ${data.heure} h` : ''}.</>
         ) : (
           <>— jamais synchronisé.</>
         )}
       </span>
-      {data.configuree && !running && (
-        <button className="btn btn-sm" onClick={() => void launch()}>
-          {lastDone ? 'Synchroniser maintenant' : 'Lancer le chargement initial'}
-        </button>
+      {data.configuree && (
+        <div className="pills" style={{ margin: 0 }}>
+          {!actif && !enPause && (
+            <button className="btn btn-sm" onClick={() => void call('synchro')}>
+              {lastDone ? 'Synchroniser maintenant' : 'Lancer le chargement initial'}
+            </button>
+          )}
+          {running && (
+            <button className="btn btn-sm" onClick={() => void call('synchro/pause')}>Mettre en pause</button>
+          )}
+          {enPause && (
+            <button className="btn btn-primary btn-sm" onClick={() => void call('synchro/reprendre')}>Reprendre</button>
+          )}
+          {(actif || enPause) && (
+            <button className="btn btn-sm btn-ghost" onClick={() => { if (window.confirm('Annuler définitivement cette synchronisation ?')) void call('synchro/annuler'); }}>
+              Annuler
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

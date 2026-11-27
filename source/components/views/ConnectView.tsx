@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { api, useApi } from '@/lib/api';
-import { useStore } from '@/lib/store';
+import { useStore, type BaseState } from '@/lib/store';
 import { fmtDate, plural } from '@/lib/text';
-import { FIELD_LABEL, type ConnectorInfo, type Tache } from '@/lib/types';
+import { FIELD_LABEL, type ConnectorInfo, type Stats, type Tache, type View } from '@/lib/types';
 import { Chip, Ic, PageHead } from '../ui';
 
 const CONTRACT = `# backend/connecteurs/ma_source.py : un fichier = un connecteur
@@ -110,6 +110,169 @@ function Progress({ t, names, onChange, blocked }: { t: Tache; names: Record<str
   );
 }
 
+type TargetType =
+  | { kind: 'sel' }
+  | { kind: 'tout'; count: number }
+  | { kind: 'filtre'; filtre: Omit<BaseState, 'page'>; label: string; count: number };
+
+type Who = { id: string; prenom: string; nom: string };
+
+/** Composant de filtres additifs pour cibler les fiches à enrichir. */
+function FiltreBuilder({
+  stats,
+  target,
+  setTarget,
+  sel,
+  selInfo,
+  toggleSel,
+  clearSel,
+  setView,
+}: {
+  stats: Stats | null;
+  target: TargetType;
+  setTarget: (t: TargetType) => void;
+  sel: string[];
+  selInfo: Record<string, Who>;
+  toggleSel: (f: Who) => void;
+  clearSel: () => void;
+  setView: (v: View) => void;
+}) {
+  // État local des critères de filtre additifs.
+  const [metier, setMetier] = useState('');
+  const [cp, setCp] = useState('');
+  const [missing, setMissing] = useState<'' | 'tel' | 'email' | 'any'>('');
+
+  const hasFiltre = metier !== '' || cp !== '' || missing !== '';
+  const fmtN = (n: number) => n.toLocaleString('fr-FR');
+
+  const appliquerFiltre = () => {
+    const filtre: Omit<BaseState, 'page'> = { q: '', metier, cp, missing };
+    const labels: string[] = [];
+    if (missing === 'tel') labels.push('sans téléphone');
+    if (missing === 'email') labels.push('sans e-mail');
+    if (missing === 'any') labels.push('sans téléphone ni e-mail');
+    if (metier) labels.push(`métier : ${metier}`);
+    if (cp) labels.push(`CP : ${cp}`);
+    const label = labels.length ? labels.join(' + ') : 'toutes les fiches';
+    // On ne peut pas connaître le count exact sans requête serveur ; on met 0 pour que
+    // le backend le détermine lui-même. L'affichage montre "filtre" sans count.
+    setTarget({ kind: 'filtre', filtre, label, count: 0 });
+  };
+
+  const n = sel.length;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {target.kind === 'tout' ? (
+        <p>
+          <strong>Toutes les fiches</strong> de la base ({fmtN(stats?.fiches ?? 0)}).{' '}
+          <button className="linkbtn" onClick={() => setTarget({ kind: 'sel' })}>Revenir à la sélection</button>
+        </p>
+      ) : target.kind === 'filtre' ? (
+        <p>
+          Filtre : <strong>{target.label}</strong>
+          {target.count > 0 ? ` — ${fmtN(target.count)} fiches` : ''}.{' '}
+          <button className="linkbtn" onClick={() => setTarget({ kind: 'sel' })}>Revenir à la sélection</button>
+        </p>
+      ) : n ? (
+        <div className="picked">
+          {sel.slice(0, 12).map((id) => {
+            const f = selInfo[id];
+            return (
+              <span className="chip chip-accent" key={id}>
+                {f ? `${f.prenom} ${f.nom}` : id}{' '}
+                <button className="linkbtn" onClick={() => toggleSel(f ?? { id, prenom: '', nom: '' })} aria-label={`Retirer ${f ? f.prenom + ' ' + f.nom : id}`}><Ic name="x" /></button>
+              </span>
+            );
+          })}
+          {n > 12 && <Chip>+ {fmtN(n - 12)} autres</Chip>}
+        </div>
+      ) : (
+        <p className="muted">Aucune fiche sélectionnée. Choisissez-les dans la base de référence ou utilisez un filtre rapide ci-dessous.</p>
+      )}
+
+      {/* Filtres rapides */}
+      <div className="pills">
+        <button
+          className="btn btn-sm"
+          disabled={!stats?.fiches}
+          onClick={() => setTarget({ kind: 'tout', count: stats?.fiches ?? 0 })}
+        >
+          Toutes les fiches ({fmtN(stats?.fiches ?? 0)})
+        </button>
+        <button
+          className="btn btn-sm"
+          disabled={!stats?.sans_tel}
+          onClick={() => setTarget({ kind: 'filtre', filtre: { q: '', metier: '', cp: '', missing: 'tel' }, count: stats?.sans_tel ?? 0, label: 'sans téléphone' })}
+        >
+          Sans téléphone ({fmtN(stats?.sans_tel ?? 0)})
+        </button>
+        <button
+          className="btn btn-sm"
+          disabled={!stats?.sans_email}
+          onClick={() => setTarget({ kind: 'filtre', filtre: { q: '', metier: '', cp: '', missing: 'email' }, count: stats?.sans_email ?? 0, label: 'sans e-mail' })}
+        >
+          Sans e-mail ({fmtN(stats?.sans_email ?? 0)})
+        </button>
+        <button className="btn btn-sm" onClick={() => setView('base')}>Choisir dans la base</button>
+        {target.kind === 'sel' && n > 0 && (
+          <button className="btn btn-sm btn-ghost" onClick={clearSel}>Vider</button>
+        )}
+      </div>
+
+      {/* Filtres combinés */}
+      <details>
+        <summary style={{ cursor: 'pointer', fontSize: '0.85rem', color: 'var(--muted)' }}>
+          Filtres combinés (métier, code postal…)
+        </summary>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'flex-end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.82rem' }}>
+            Coordonnées manquantes
+            <select
+              className="input"
+              style={{ width: 180 }}
+              value={missing}
+              onChange={(e) => setMissing(e.target.value as '' | 'tel' | 'email' | 'any')}
+            >
+              <option value="">Toutes</option>
+              <option value="tel">Sans téléphone</option>
+              <option value="email">Sans e-mail</option>
+              <option value="any">Sans tél. ni e-mail</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.82rem' }}>
+            Métier
+            <input
+              className="input"
+              style={{ width: 160 }}
+              placeholder="ex: Médecin"
+              value={metier}
+              onChange={(e) => setMetier(e.target.value)}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.82rem' }}>
+            Code postal
+            <input
+              className="input"
+              style={{ width: 100 }}
+              placeholder="ex: 75"
+              value={cp}
+              onChange={(e) => setCp(e.target.value)}
+            />
+          </label>
+          <button
+            className="btn btn-sm btn-primary"
+            disabled={!hasFiltre}
+            onClick={appliquerFiltre}
+          >
+            Appliquer ce filtre
+          </button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 export default function ConnectView() {
   const sel = useStore((s) => s.sel);
   const selInfo = useStore((s) => s.selInfo);
@@ -155,9 +318,10 @@ export default function ConnectView() {
   }, [running]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const target = conn.target;
-  const n = target.kind === 'filtre' ? target.count : sel.length;
+  const n = target.kind === 'tout' ? target.count : target.kind === 'filtre' ? target.count : sel.length;
   const ready = conn.selected.filter((id) => connectors?.find((c) => c.id === id)?.pret);
-  const canRun = !running && n > 0 && ready.length > 0;
+  // Pour le target 'tout' ou 'filtre' sans count précis, on autorise le lancement.
+  const canRun = !running && (target.kind !== 'sel' || n > 0) && ready.length > 0;
 
   return (
     <>
@@ -168,40 +332,25 @@ export default function ConnectView() {
       <section className="panel">
         <div className="panel-head">
           <h2>1. Fiches à enrichir</h2>
-          <Chip tone="accent">{target.kind === 'filtre' ? plural(target.count, 'fiche') : plural(n, 'fiche sélectionnée', 'fiches sélectionnées')}</Chip>
+          <Chip tone="accent">
+            {target.kind === 'tout'
+              ? plural(target.count, 'fiche')
+              : target.kind === 'filtre'
+              ? (target.count > 0 ? plural(target.count, 'fiche') : 'filtre actif')
+              : plural(n, 'fiche sélectionnée', 'fiches sélectionnées')}
+          </Chip>
         </div>
-        <div className="panel-pad" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {target.kind === 'filtre' ? (
-            <p>
-              Toutes les fiches du filtre : <strong>{target.label}</strong>{' '}
-              <button className="linkbtn" onClick={() => setTarget({ kind: 'sel' })}>Revenir à la sélection</button>
-            </p>
-          ) : n ? (
-            <div className="picked">
-              {sel.slice(0, 12).map((id) => {
-                const f = selInfo[id];
-                return (
-                  <span className="chip chip-accent" key={id}>
-                    {f ? `${f.prenom} ${f.nom}` : id}{' '}
-                    <button className="linkbtn" onClick={() => toggleSel(f ?? { id, prenom: '', nom: '' })} aria-label={`Retirer ${f ? f.prenom + ' ' + f.nom : id}`}><Ic name="x" /></button>
-                  </span>
-                );
-              })}
-              {n > 12 && <Chip>+ {fmtN(n - 12)} autres</Chip>}
-            </div>
-          ) : (
-            <p className="muted">Aucune fiche sélectionnée. Choisissez-les dans la base de référence ou ajoutez-les ci-dessous.</p>
-          )}
-          <div className="pills">
-            <button className="btn btn-sm" disabled={!stats?.sans_tel} onClick={() => setTarget({ kind: 'filtre', filtre: { q: '', metier: '', cp: '', missing: 'tel' }, count: stats?.sans_tel ?? 0, label: 'toutes les fiches sans téléphone' })}>
-              Toutes les fiches sans téléphone ({fmtN(stats?.sans_tel ?? 0)})
-            </button>
-            <button className="btn btn-sm" disabled={!stats?.sans_email} onClick={() => setTarget({ kind: 'filtre', filtre: { q: '', metier: '', cp: '', missing: 'email' }, count: stats?.sans_email ?? 0, label: 'toutes les fiches sans e-mail' })}>
-              Toutes les fiches sans e-mail ({fmtN(stats?.sans_email ?? 0)})
-            </button>
-            <button className="btn btn-sm" onClick={() => setView('base')}>Choisir dans la base</button>
-            {target.kind === 'sel' && n > 0 && <button className="btn btn-sm btn-ghost" onClick={clearSel}>Vider</button>}
-          </div>
+        <div className="panel-pad">
+          <FiltreBuilder
+            stats={stats}
+            target={target}
+            setTarget={setTarget}
+            sel={sel}
+            selInfo={selInfo}
+            toggleSel={toggleSel}
+            clearSel={clearSel}
+            setView={setView}
+          />
         </div>
       </section>
 

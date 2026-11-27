@@ -199,7 +199,7 @@ export interface Synchro {
   debut: string;
   fin: string | null;
   depuis: string | null;
-  statut: 'running' | 'done' | 'failed';
+  statut: 'running' | 'pausing' | 'paused' | 'cancelling' | 'cancelled' | 'done' | 'failed';
   pages: number;
   lignes: number;
   creees: number;

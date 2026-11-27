@@ -19,6 +19,39 @@ import threading
 import urllib.parse
 from datetime import timedelta
 
+# Événement global pour demander une pause ou un arrêt de la synchro en cours.
+# Le thread lit cet événement entre chaque page ; s'il est positionné, il met à jour
+# le statut de la synchro puis s'arrête proprement.
+_stop_event: threading.Event = threading.Event()
+_stop_lock: threading.Lock = threading.Lock()
+_demande: str = ""  # "pause" | "annuler"
+
+
+def demander_pause() -> bool:
+    """Demande une pause de la synchro en cours. Retourne False si rien ne tourne."""
+    with _stop_lock:
+        if not _stop_event.is_set():
+            global _demande
+            _demande = "pause"
+            _stop_event.set()
+            return True
+        return False
+
+
+def demander_annulation() -> bool:
+    """Demande l'annulation de la synchro en cours. Retourne False si rien ne tourne."""
+    with _stop_lock:
+        if not _stop_event.is_set():
+            global _demande
+            _demande = "annuler"
+            _stop_event.set()
+            return True
+        # Déjà un stop en cours : on peut forcer vers 'annuler'
+        if _demande == "pause":
+            _demande = "annuler"
+            return True
+        return False
+
 import psycopg
 
 from . import ans, config, db
@@ -115,28 +148,57 @@ def url_depart(depuis: str | None) -> str:
     return f"{config.FHIR_BASE.rstrip('/')}/PractitionerRole?{urllib.parse.urlencode(params)}"
 
 
-def synchroniser(par: str = "planification", bundles=None) -> dict | None:
+def synchroniser(par: str = "planification", bundles=None, sid_reprendre: int | None = None) -> dict | None:
     """Exécute une synchronisation complète ou différentielle. `bundles` sert aux tests.
+    `sid_reprendre` permet de reprendre une synchro en pause (réutilise le même enregistrement).
     Renvoie le bilan, ou None si une synchro est déjà en cours."""
     if bundles is None and not config.ESANTE_API_KEY:
         raise RuntimeError("ESANTE_API_KEY n'est pas définie.")
+    # Réinitialiser l'événement de stop avant de démarrer.
+    with _stop_lock:
+        global _demande
+        _demande = ""
+        _stop_event.clear()
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as verrou:
         if not verrou.execute("SELECT pg_try_advisory_lock(%s)", (VERROU,)).fetchone()[0]:
             return None
         with connexion() as conn:
-            prec = conn.execute(
-                "SELECT debut FROM igeya.synchros WHERE statut = 'done' ORDER BY debut DESC LIMIT 1"
-            ).fetchone()
-            depuis = (prec["debut"] - timedelta(days=1)) if prec else None
-            sid = conn.execute(
-                "INSERT INTO igeya.synchros (depuis, par) VALUES (%s, %s) RETURNING id", (depuis, par)
-            ).fetchone()["id"]
-        bilan = {"pages": 0, "lignes": 0, "creees": 0, "maj": 0}
+            if sid_reprendre:
+                # Reprendre une synchro en pause : on repart de là où elle en était.
+                row = conn.execute(
+                    "UPDATE igeya.synchros SET statut = 'running', fin = NULL WHERE id = %s AND statut = 'paused' RETURNING *",
+                    (sid_reprendre,)
+                ).fetchone()
+                if not row:
+                    return None
+                sid = row["id"]
+                bilan = {"pages": row["pages"], "lignes": row["lignes"], "creees": row["creees"], "maj": row["maj"]}
+                depuis = row["depuis"]
+            else:
+                prec = conn.execute(
+                    "SELECT debut FROM igeya.synchros WHERE statut = 'done' ORDER BY debut DESC LIMIT 1"
+                ).fetchone()
+                depuis = (prec["debut"] - timedelta(days=1)) if prec else None
+                sid = conn.execute(
+                    "INSERT INTO igeya.synchros (depuis, par) VALUES (%s, %s) RETURNING id", (depuis, par)
+                ).fetchone()["id"]
+                bilan = {"pages": 0, "lignes": 0, "creees": 0, "maj": 0}
         try:
             if bundles is None:
                 bundles = ans.iter_bundles(url_depart(depuis.date().isoformat() if depuis else None),
                                            config.ESANTE_API_KEY, config.SYNC_MAX_PAGES or None)
             for page, bundle in bundles:
+                # Vérifier si une pause ou annulation a été demandée.
+                if _stop_event.is_set():
+                    statut_stop = "paused" if _demande == "pause" else "cancelled"
+                    with connexion() as conn:
+                        conn.execute(
+                            "UPDATE igeya.synchros SET statut = %s, fin = now(), pages = %s, lignes = %s, creees = %s, maj = %s WHERE id = %s",
+                            (statut_stop, bilan["pages"], bilan["lignes"], bilan["creees"], bilan["maj"], sid),
+                        )
+                    config.log.info("Synchronisation %s (demande : %s).", statut_stop, _demande)
+                    return bilan
+
                 entries = [e["resource"] for e in bundle.get("entry", []) if "resource" in e]
                 by_ref = {f'{r["resourceType"]}/{r["id"]}': r for r in entries}
                 with connexion() as conn:
@@ -160,12 +222,26 @@ def synchroniser(par: str = "planification", bundles=None) -> dict | None:
             with connexion() as conn:
                 conn.execute("UPDATE igeya.synchros SET statut = 'failed', fin = now(), message = %s WHERE id = %s", (str(e)[:1000], sid))
             raise
+        finally:
+            with _stop_lock:
+                _demande = ""
+                _stop_event.clear()
         return bilan
 
 
 def en_cours() -> bool:
     with connexion() as conn:
-        return conn.execute("SELECT 1 FROM igeya.synchros WHERE statut = 'running' LIMIT 1").fetchone() is not None
+        return conn.execute(
+            "SELECT 1 FROM igeya.synchros WHERE statut IN ('running', 'pausing', 'cancelling') LIMIT 1"
+        ).fetchone() is not None
+
+
+def synchro_en_pause() -> dict | None:
+    """Renvoie la dernière synchro en pause, ou None."""
+    with connexion() as conn:
+        return conn.execute(
+            "SELECT * FROM igeya.synchros WHERE statut = 'paused' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
 
 def lancer_en_fond(par: str) -> bool:
@@ -183,12 +259,29 @@ def lancer_en_fond(par: str) -> bool:
     return True
 
 
+def reprendre_en_fond(sid: int) -> bool:
+    """Reprend en arrière-plan une synchro mise en pause."""
+    if en_cours():
+        return False
+
+    def run() -> None:
+        try:
+            synchroniser(sid_reprendre=sid)
+        except Exception:  # noqa: BLE001
+            pass
+
+    threading.Thread(target=run, name="synchro", daemon=True).start()
+    return True
+
+
 def nettoyer_interrompues() -> None:
-    """Au démarrage : une synchro « running » sans verrou a été coupée par un redémarrage."""
+    """Au démarrage : une synchro « running/pausing/cancelling » sans verrou a été coupée."""
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as c:
         if c.execute("SELECT pg_try_advisory_lock(%s)", (VERROU,)).fetchone()[0]:
-            c.execute("UPDATE igeya.synchros SET statut = 'failed', fin = now(), message = 'Interrompue par un redémarrage.'"
-                      " WHERE statut = 'running'")
+            c.execute(
+                "UPDATE igeya.synchros SET statut = 'failed', fin = now(), message = 'Interrompue par un redémarrage.'"
+                " WHERE statut IN ('running', 'pausing', 'cancelling')"
+            )
             c.execute("SELECT pg_advisory_unlock(%s)", (VERROU,))
 
 
