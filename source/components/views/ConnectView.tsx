@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { api, useApi } from '@/lib/api';
 import { useStore, type BaseState } from '@/lib/store';
 import { fmtDate, plural } from '@/lib/text';
-import { FIELD_LABEL, type ConnectorInfo, type Stats, type Tache } from '@/lib/types';
+import { FIELD_LABEL, type ConnectorInfo, type Stats, type Tache, type View } from '@/lib/types';
 import { Chip, Ic, PageHead } from '../ui';
 
 const CONTRACT = `# backend/connecteurs/ma_source.py : un fichier = un connecteur
@@ -135,7 +135,7 @@ function FiltreBuilder({
   selInfo: Record<string, Who>;
   toggleSel: (f: Who) => void;
   clearSel: () => void;
-  setView: (v: string) => void;
+  setView: (v: View) => void;
 }) {
   // État local des critères de filtre additifs.
   const [metier, setMetier] = useState('');
